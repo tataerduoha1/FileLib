@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.tmp/
+_shots/
+*.log
+.workbuddy/
+start.filelib.bat.bak
+.testdata/
+.trae-html-share-packages/
+.screenshots/
+
