@@ -1261,6 +1261,14 @@ details.navdetail > summary::-webkit-details-marker { display: none; }
   .admtable td:nth-child(5), .admtable td:nth-child(6) { display: none; }
   .setgrid { grid-template-columns: 1fr; }
 
+  /* 标签管理器：手机端行内「改名/隐藏/删除」三个按钮（触屏下 .btn.small
+     放大到 8px/12px 内边距，合计 ~170px）+ 计数 + 徽标 + 勾选框占掉大半行，
+     标签名只剩十几像素甚至为零，根本看不出标签是什么。
+     修复：操作按钮整行换行到第二行右对齐，第一行留给「勾选+标签名+徽标+计数」。 */
+  .tg-row { flex-wrap: wrap; row-gap: 6px; }
+  .tg-ops { flex-basis: 100%; justify-content: flex-end; }
+  .tg-name { font-size: 13px; }
+
   .rd-body { padding: 18px 16px; font-size: 16px; }
   .rd-side { position: absolute; left: 0; top: 50px; bottom: 0; z-index: 5; box-shadow: var(--shadow2); }
   /* 手机竖屏阅读条放不下 7 个控件：藏次要的（字号/已读），
