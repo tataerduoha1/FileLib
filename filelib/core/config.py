@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 APP_NAME = "FileLib"
-APP_VERSION = "1.0.12"
+APP_VERSION = "1.0.13"
 
 # 程序根目录（server.py 所在目录）
 APP_ROOT = Path(__file__).resolve().parent.parent.parent

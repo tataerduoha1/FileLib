@@ -483,7 +483,9 @@ async function loadTags() {
   const el = $("#nav-tags");
   if (!el) return;
   try {
-    const r = await api(withVol("/api/tags?limit=40"));
+    // limit=300：以前 40 会导致「详情页刚加的标签」（使用数 1）排不进
+    // 前 40 名，侧栏「人工」下永远看不到，标签管理器里却搜得到
+    const r = await api(withVol("/api/tags?limit=300"));
     const items = r.items || [];
     const f = TAGS_VIEW;
     const shown = items.filter(t => f === "all" || (f === "user" ? t.user : !t.user));
@@ -4664,10 +4666,11 @@ function bindUI() {
 
 /* 标签管理器（admin）
    搜索 / 排序 / 来源筛选（含隐藏） / 多选批量（合并·隐藏·删除） / 单个改名。
-   行点击 = 用该标签筛选文件（与侧栏点标签一致，保留基本功能）。
-   隐藏 ≠ 删除：隐藏的标签不出现在侧栏与聚合里，文件筛选仍可用。 */
-async function openTagAdmin() {
-  const M = { view: "all", sort: "n", q: "", sel: new Set(), all: [] };
+   点标签名 = 用该标签筛选文件（与侧栏点标签一致）；点勾选框/空白只做选择。
+   隐藏 ≠ 删除：隐藏的标签不出现在侧栏与聚合里，文件筛选仍可用。
+   initialQ：打开时预填搜索框（新建成功后用它让用户立刻看到新标签）。 */
+async function openTagAdmin(initialQ = "") {
+  const M = { view: "all", sort: "n", q: String(initialQ || "").trim(), sel: new Set(), all: [] };
   const strip = s => String(s).replace(/^auto:/, "");
   openModal(`<h2>🏷 标签管理器</h2>
     <div class="tg-top">
@@ -4703,6 +4706,8 @@ async function openTagAdmin() {
     $("#tg-bulk").classList.toggle("hidden", M.sel.size === 0);
     $("#tg-selcnt").textContent = `已选 ${M.sel.size} 个`;
   };
+  const qi = $("#tg-q");
+  if (qi && M.q) qi.value = M.q;    // 新建成功后带名重开：立刻看到刚建的标签
 
   /* 当前 tab + 搜索词 + 排序下的标签列表（render 与全选共用同一套过滤逻辑） */
   const filteredTags = () => {
@@ -4741,7 +4746,9 @@ async function openTagAdmin() {
       const flag = t.generic ? `<span class="tg-flag" title="出现在超过 30% 的文件上，区分度低">泛</span>`
         : (t.rare ? `<span class="tg-flag" title="少于 3 个文件在用，多为噪声">微</span>` : "");
       return `<div class="tg-row ${t.hidden ? "ishid" : ""}" data-nm="${nm}">
-        <input type="checkbox" class="tg-ck" data-nm="${nm}" ${M.sel.has(t.name) ? "checked" : ""}>
+        <label class="tg-ckw" title="勾选以进行批量操作（点这里不会跳出管理器）">
+          <input type="checkbox" class="tg-ck" data-nm="${nm}" ${M.sel.has(t.name) ? "checked" : ""}>
+        </label>
         <span class="tg-name" title="${nm}（点击筛选该标签的文件）">${disp}</span>${badge}${flag}
         <span class="tg-n">${(t.n || 0).toLocaleString()}</span>
         <span class="tg-ops">
@@ -4756,7 +4763,8 @@ async function openTagAdmin() {
   };
 
   const reload = async () => {
-    const r = await api(withVol("/api/tags?limit=2000&show_hidden=1"));
+    // empty=1：零关联标签（刚新建还没挂文件）也要返回，否则新建后搜不到
+    const r = await api(withVol("/api/tags?limit=2000&show_hidden=1&empty=1"));
     M.all = r.items || [];
     render();
     loadTags();                    // 侧栏同步
@@ -4778,8 +4786,9 @@ async function openTagAdmin() {
       syncAllBtn();
     });
     $$("#tg-list .tg-row").forEach(row => row.onclick = e => {
-      if (e.target.closest("input,button")) return;
-      // 行点击 = 用该标签筛选文件（与侧栏点标签一致）
+      // 只有点「标签名」才跳出去筛选文件；点勾选框 / 按钮 / 行内空白都不动，
+      // 避免想勾选时点偏一点就被弹出管理器（高频误触反馈）
+      if (!e.target.closest(".tg-name")) return;
       state.tag = row.dataset.nm;
       Object.assign(state, { view: "list", dir: "", kind: null, topic: null,
         series: null, author: null, mark: null });
@@ -4869,10 +4878,15 @@ async function openTagAdmin() {
   $("#tag-new").onclick = async () => {
     const name = (await uiPrompt("新建标签", { placeholder: "标签名" }))?.trim();
     if (!name) return;
-    try { await api("/api/tag_admin", post({ action: "create", name })); }
-    catch (err) { toast(err.message, 2600); }
     loadTags();
-    openTagAdmin();
+    try { await api("/api/tag_admin", post({ action: "create", name })); }
+    catch (err) {
+      toast(err.message, 2600);    // 重名等错误：服务端会明确提示
+      openTagAdmin();
+      return;
+    }
+    toast(`已创建「${strip(name)}」`);
+    openTagAdmin(name);            // 预填搜索框，确认新标签就在眼前
   };
 
   await reload();

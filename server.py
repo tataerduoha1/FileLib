@@ -981,7 +981,8 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(self.store.all_tags(
             vol_id=vol, q=(self._q1("q", "") or "").strip(),
             limit=sec.clamp_int(self._q1("limit", "200"), 1, 2000, 200),
-            show_hidden=self._q1("show_hidden", "") == "1"))
+            show_hidden=self._q1("show_hidden", "") == "1",
+            include_empty=self._q1("empty", "") == "1"))
 
     # ---------- 全文搜索 ----------
 
@@ -2311,6 +2312,12 @@ class Handler(BaseHTTPRequestHandler):
             name = sec.safe_name(str(body.get("name") or ""), 40)
             if not name:
                 return self._err(400, "标签名不能为空")
+            # 重名明确提示：INSERT OR IGNORE 静默成功会让用户以为
+            # 「新建成功但搜不到」，实际上标签早已存在
+            dup = self.store.conn.execute(
+                "SELECT 1 FROM tags WHERE name=?", (name,)).fetchone()
+            if dup:
+                return self._err(409, f"标签「{name}」已存在")
             users_mod.audit(self.store.rw, me, ip, "tag.create", name)
             return self._json(self.store.tag_create(name, str(body.get("color") or "")))
         if act == "rename":

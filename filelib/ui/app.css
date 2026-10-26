@@ -1514,14 +1514,24 @@ details.navdetail > summary::-webkit-details-marker { display: none; }
   border-radius: 8px; background: var(--bg2);
 }
 .tg-row {
-  display: flex; align-items: center; gap: 8px; padding: 7px 10px;
-  border-bottom: 1px solid var(--line); cursor: pointer;
+  display: flex; align-items: center; gap: 10px; padding: 7px 10px;
+  border-bottom: 1px solid var(--line); cursor: default;
 }
 .tg-row:last-child { border-bottom: 0; }
 .tg-row:hover { background: var(--bg3); }
 .tg-row.ishid .tg-name { opacity: .45; text-decoration: line-through; }
-.tg-row input[type="checkbox"] { width: 14px; height: 14px; accent-color: var(--acc); margin: 0; flex: none; }
-.tg-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+/* 勾选框包一层 label 做大点击热区：以前裸 14px 的 checkbox 稍点偏就
+   落到名字/行空白上被当成「点标签」跳出管理器（高频误触反馈） */
+.tg-row .tg-ckw {
+  flex: none; display: flex; align-items: center; cursor: pointer;
+  padding: 6px; margin: -6px 0 -6px -6px;   /* 热区外扩，但不改变行高 */
+}
+.tg-row input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--acc); margin: 0; flex: none; cursor: pointer; }
+.tg-name {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12.5px; cursor: pointer;
+}
+.tg-row .tg-name:hover { color: var(--acc); text-decoration: underline; }
 .tg-badge {
   flex: none; font-size: 10px; padding: 1px 7px; border-radius: 999px;
   background: var(--bg3); border: 1px solid var(--line); color: var(--fg2);
