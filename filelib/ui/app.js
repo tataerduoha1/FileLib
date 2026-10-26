@@ -427,10 +427,9 @@ async function loadStats(silent) {
   STATS = st;
   state.libs = st.volumes || [];
 
-  // 后台默认设置桥接（随 /api/stats 下发）：休息提醒 / 默认主题 / 站点名。
-  // 个人覆盖永远优先：右上角 🧘 设过个人值、或手动切过主题的，不受后台默认影响。
+  // 后台默认设置桥接（随 /api/stats 下发）：默认主题 / 站点名。
+  // 个人覆盖永远优先：手动切过主题的，不受后台默认影响。
   const stg = st.settings || {};
-  if (stg.rest_remind !== undefined) applyRestDefaults(stg);
   if (stg.theme) {
     let hasTheme = false;
     try { hasTheme = !!localStorage.getItem("filelib.theme"); } catch {}
@@ -3225,48 +3224,6 @@ function uiPrompt(title, opts = {}) {
   });
 }
 
-/* ---------------- 休息提醒 ---------------- */
-
-const REST = { on: false, interval: 45, idlePause: true, lastActive: Date.now(),
-  shown: false, startAt: Date.now(), offToday: false };
-
-function startRest() {
-  try {
-    REST.offToday = localStorage.getItem("filelib.rest.offday") === new Date().toISOString().slice(0, 10);
-  } catch {}
-  ["mousemove", "keydown", "click", "scroll", "touchstart"].forEach(ev =>
-    document.addEventListener(ev, () => { REST.lastActive = Date.now(); }, { passive: true }));
-  setInterval(() => {
-    if (!REST.on || REST.offToday || REST.shown) return;
-    if (REST.idlePause && Date.now() - REST.lastActive > 3 * 60 * 1000) {
-      REST.startAt = Date.now();
-      return;
-    }
-    if (Date.now() - REST.startAt >= REST.interval * 60 * 1000) {
-      REST.shown = true;
-      $("#rest-min").textContent = REST.interval;
-      $("#rest").classList.remove("hidden");
-    }
-  }, 5000);
-}
-function applyRestDefaults(st) {
-  // 两处入口的联动语义：管理后台的「休息提醒」是全体默认值，
-  // 右上角面板保存过的是本机个人覆盖（localStorage），个人覆盖优先。
-  let personal = null;
-  try { personal = JSON.parse(localStorage.getItem("filelib.rest") || "null"); } catch {}
-  if (personal) {
-    REST.on = !!personal.on;
-    REST.interval = personal.interval || 45;
-    REST.idlePause = personal.idle !== false;
-  } else if (st && st.rest_remind !== undefined) {
-    REST.on = !!st.rest_remind;
-    REST.interval = st.rest_interval_min || 45;
-    REST.idlePause = st.idle_pause !== false;
-  }
-  const b = $("#btn-rest");
-  if (b) b.title = REST.on ? `休息提醒：每 ${REST.interval} 分钟` : "休息提醒（未开启）";
-}
-
 /* ---------------- 快捷键帮助 ---------------- */
 
 const SHORTCUTS = [
@@ -3320,11 +3277,9 @@ document.addEventListener("keydown", e => {
       ["#reader", closeReader],
       ["#detail", closeDetail],
       ["#adminpanel", () => $("#adminpanel").classList.add("hidden")],
-      ["#restset", () => $("#restset").classList.add("hidden")],
       ["#lib-menu", () => $("#lib-menu").classList.add("hidden")],
       ["#toolsmenu", () => $("#toolsmenu").classList.add("hidden")],
       ["#ctxmenu", () => $("#ctxmenu").classList.add("hidden")],
-      ["#rest", () => { $("#rest").classList.add("hidden"); REST.shown = false; REST.startAt = Date.now(); }],
     ];
     for (const [sel, fn] of layers) {
       const el = $(sel);
@@ -3570,7 +3525,6 @@ function userMenu(e) {
     ${isAdmin() ? `<div data-u="admin">🛡 管理后台</div>` : ""}
     <div data-u="theme">🎨 切换主题</div>
     <div data-u="help">⌨ 快捷键</div>
-    <div data-u="rest">🧘 休息提醒设置</div>
     <hr><div data-u="logout" class="danger">↩ 退出登录</div>`;
   m.classList.remove("hidden");
   const r = $("#whoami").getBoundingClientRect();
@@ -3583,7 +3537,6 @@ function userMenu(e) {
     if (a === "admin") openAdmin("users");
     else if (a === "help") $("#help").classList.remove("hidden");
     else if (a === "theme") cycleTheme();
-    else if (a === "rest") $("#btn-rest").click();
     else if (a === "logout") {
       if (!confirm("退出登录？")) return;
       // 登出要点：不管请求成功与否，都必须真的退出。
@@ -3937,14 +3890,6 @@ async function adminSettings(el) {
           超过份数的最旧文件自动删除。</div>
       </div>
       <div class="setcard">
-        <h3>🧘 休息提醒</h3>
-        <div class="setrow"><label>默认开启</label>
-          <input type="checkbox" id="s-rest" ${chk(s.rest_remind)}></div>
-        <div class="setrow"><label>间隔（分钟）</label>
-          <input type="number" id="s-rest-int" min="5" max="240" step="5" value="${s.rest_interval_min || 45}"></div>
-        <div class="set-note">这里是全体默认值，保存后立即生效；用户在右上角 🧘 设过的以个人设置为准。</div>
-      </div>
-      <div class="setcard">
         <h3>⚙ 界面</h3>
         <div class="setrow"><label>站点名称</label>
           <input type="text" id="s-site" value="${esc(s.site_name || "FileLib")}"></div>
@@ -3987,8 +3932,6 @@ async function adminSettings(el) {
       scan_temp_interval_min: +$("#s-scan-int").value || 30,
       auto_backup: $("#s-backup").checked,
       backup_keep: +$("#s-keep").value || 3,
-      rest_remind: $("#s-rest").checked,
-      rest_interval_min: +$("#s-rest-int").value || 45,
       site_name: $("#s-site").value.trim() || "FileLib",
       theme: $("#s-theme").value,
       rate_limit_user: +$("#s-rate").value || 600,
@@ -3998,9 +3941,6 @@ async function adminSettings(el) {
       await api("/api/admin/settings", post(body));
       $("#brand-name").textContent = body.site_name;
       document.title = body.site_name + " · 本地资料库";
-      // 本机立即采用刚保存的后台默认值（若本机设过个人覆盖则个人覆盖仍优先）
-      applyRestDefaults({ rest_remind: body.rest_remind,
-        rest_interval_min: body.rest_interval_min, idle_pause: true });
       toast("设置已保存");
     } catch (e) { alert(e.message); }
   };
@@ -4610,50 +4550,6 @@ function bindUI() {
     openTagAdmin();
   };
 
-  // 休息提醒
-  $("#btn-rest").onclick = () => {
-    $("#rs-on").checked = REST.on;
-    $("#rs-int").value = REST.interval;
-    $("#rs-idle").checked = REST.idlePause;
-    $("#restset").classList.remove("hidden");
-    // 打开即全选间隔值：直接键入就能覆盖旧值，避免出现 45+20=4520 这类拼接
-    try { $("#rs-int").select(); } catch {}
-    $("#rs-int").focus();
-  };
-  $("#rs-cancel").onclick = () => $("#restset").classList.add("hidden");
-  $("#rs-ok").onclick = () => {
-    REST.on = $("#rs-on").checked;
-    REST.interval = Math.max(5, Math.min(240, parseInt($("#rs-int").value, 10) || 45));
-    REST.idlePause = $("#rs-idle").checked;
-    REST.shown = false;
-    REST.startAt = Date.now();
-    try {
-      localStorage.setItem("filelib.rest", JSON.stringify({
-        on: REST.on, interval: REST.interval, idle: REST.idlePause,
-      }));
-    } catch {}
-    $("#restset").classList.add("hidden");
-    $("#btn-rest").title = REST.on ? `休息提醒：每 ${REST.interval} 分钟` : "休息提醒（未开启）";
-    toast(REST.on ? `已开启：每 ${REST.interval} 分钟提醒休息` : "已关闭休息提醒");
-  };
-  $("#rest-ok").onclick = () => {
-    $("#rest").classList.add("hidden");
-    REST.shown = false;
-    REST.startAt = Date.now();
-  };
-  $("#rest-snooze").onclick = () => {
-    $("#rest").classList.add("hidden");
-    REST.shown = false;
-    REST.startAt = Date.now() - Math.max(0, REST.interval - 5) * 60 * 1000;
-  };
-  $("#rest-off").onclick = () => {
-    $("#rest").classList.add("hidden");
-    REST.shown = false;
-    REST.offToday = true;
-    try { localStorage.setItem("filelib.rest.offday", new Date().toISOString().slice(0, 10)); } catch {}
-    toast("今天不再提醒，明天自动恢复");
-  };
-
   bindSearch();
   window.addEventListener("resize", debounce(() => {
     if (!isMobile()) document.body.classList.remove("sb-open");
@@ -4917,7 +4813,6 @@ async function openTagAdmin(initialQ = "") {
 }
 
 async function boot() {
-  startRest();
   // 初始主题不落 localStorage：先把后台默认主题的机会留给 loadStats 桥接
   applyTheme(document.body.dataset.theme || "light", false);
   try { RD.fontSize = +(localStorage.getItem("filelib.font") || 17) || 17; } catch {}

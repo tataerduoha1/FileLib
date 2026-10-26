@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 APP_NAME = "FileLib"
-APP_VERSION = "1.0.16"
+APP_VERSION = "1.0.17"
 
 # 程序根目录（server.py 所在目录）
 APP_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -115,8 +115,6 @@ DEFAULTS = {
     "rate_limit_media": 600,       # 媒体流/下载每分钟次数（拖进度条会连发 Range）
     "max_media_sessions": 3,       # 普通用户同时进行的视频播放数
     "max_transcode_sessions": 2,   # 全局同时进行的转码路数（每路一个 ffmpeg 进程）
-    "rest_remind": False,          # 默认关闭，首次启动引导里可开
-    "rest_interval_min": 45,
     "scan_temp_enabled": False,
     "scan_temp_interval_min": 120,  # 临时扫描间隔（分钟）
     "scan_daily_time": "08:30",     # 每天定时扫描时间

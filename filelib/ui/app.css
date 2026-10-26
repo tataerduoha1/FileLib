@@ -1062,7 +1062,7 @@ details.navdetail > summary::-webkit-details-marker { display: none; }
 }
 
 /* ---------------- 弹窗 / 右键菜单 / 提示 ---------------- */
-#modal, #help, #restset {
+#modal, #help {
   position: fixed; inset: 0; z-index: 110;
   background: rgba(0, 0, 0, .5); backdrop-filter: blur(3px);
   display: flex; align-items: center; justify-content: center; padding: 20px;
@@ -1139,11 +1139,10 @@ details.navdetail > summary::-webkit-details-marker { display: none; }
 @keyframes modalin {
   from { opacity: 0; transform: scale(.96) translateY(10px); }
 }
-#modal:not(.hidden), #help:not(.hidden), #restset:not(.hidden) {
+#modal:not(.hidden), #help:not(.hidden) {
   animation: fadein .18s ease;
 }
-#modal:not(.hidden) .modal-box, #help:not(.hidden) .modal-box,
-#restset:not(.hidden) .modal-box {
+#modal:not(.hidden) .modal-box, #help:not(.hidden) .modal-box {
   animation: modalin .22s cubic-bezier(.2, .9, .3, 1.15);
 }
 #modal.closing, #modal.closing .modal-box { animation: fadeout .14s ease forwards; }
@@ -1182,17 +1181,6 @@ details.navdetail > summary::-webkit-details-marker { display: none; }
 /* 空态/加载占位微动效 */
 .empty .big { animation: floaty 3s ease-in-out infinite; }
 @keyframes floaty { 50% { transform: translateY(-5px); } }
-
-/* 休息提醒 */
-.rest-box {
-  width: 380px; max-width: 100%; text-align: center;
-  background: var(--bg2); border: 1px solid var(--line);
-  border-radius: 16px; box-shadow: var(--shadow2); padding: 30px 26px;
-}
-.rest-ico { font-size: 54px; margin-bottom: 8px; animation: pulse 2.4s infinite; }
-.rest-box h2 { font-size: 18px; margin-bottom: 10px; }
-.rest-box p { font-size: 13px; color: var(--fg2); line-height: 1.9; margin-bottom: 18px; }
-.rest-btns { display: flex; flex-direction: column; gap: 8px; }
 
 /* 工具栏下拉 */
 #toolsmenu {

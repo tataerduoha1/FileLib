@@ -910,9 +910,6 @@ class Handler(BaseHTTPRequestHandler):
     def _public_settings(self) -> dict:
         conn = self.store.conn
         return {
-            "rest_remind": dbmod.get_setting(conn, "rest_remind", False),
-            "rest_interval_min": dbmod.get_setting(conn, "rest_interval_min", 45),
-            "idle_pause": dbmod.get_setting(conn, "idle_pause", True),
             "theme": dbmod.get_setting(conn, "theme", "light"),
             "site_name": dbmod.get_setting(conn, "site_name", "FileLib"),
         }
@@ -1574,7 +1571,7 @@ class Handler(BaseHTTPRequestHandler):
         body = self._body()
         me = self._admin()
         ip = sec.client_ip(self)
-        allowed = {"rest_remind", "rest_interval_min", "idle_pause", "theme", "site_name",
+        allowed = {"theme", "site_name",
                    "scan_temp_enabled", "scan_temp_interval_min", "scan_daily_enabled",
                    "scan_daily_time", "auto_backup", "backup_keep", "rate_limit_user",
                    "rate_limit_guest", "rate_limit_media", "max_media_sessions",

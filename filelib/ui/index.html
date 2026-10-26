@@ -41,7 +41,6 @@
     </div>
 
     <div class="actions" style="display:flex;gap:6px;align-items:center;flex:0 0 auto">
-      <button id="btn-rest" class="btn ghost icon" title="休息提醒">🧘</button>
       <button id="btn-theme" class="btn ghost icon" title="切换主题 (T)">☀️</button>
       <button id="btn-admin" class="btn ghost icon admin-only hidden" title="管理后台">🛡</button>
       <button id="btn-tools" class="btn ghost icon admin-only hidden" title="维护工具">🧰</button>
@@ -278,36 +277,6 @@
       <button class="btn small ghost" id="admin-close">✕ 关闭</button>
     </div>
     <div id="admin-body" class="admin-body"></div>
-  </div>
-</div>
-
-<!-- 休息提醒 -->
-<div id="rest" class="hidden">
-  <div class="rest-box">
-    <div class="rest-ico">🧘</div>
-    <h2>起来休息一下</h2>
-    <p>已经连续看了 <b id="rest-min">45</b> 分钟。<br>
-      站起来走两步、远眺 20 秒、喝口水，眼睛和腰都会谢谢你。</p>
-    <div class="rest-btns">
-      <button class="btn acc" id="rest-ok">我休息了（重新计时）</button>
-      <button class="btn ghost" id="rest-snooze">再等 5 分钟</button>
-      <button class="btn ghost" id="rest-off">今天关掉</button>
-    </div>
-  </div>
-</div>
-
-<!-- 休息设置 -->
-<div id="restset" class="hidden">
-  <div class="modal-box">
-    <h2>🧘 休息提醒</h2>
-    <label class="row"><input type="checkbox" id="rs-on"> 开启定时提醒</label>
-    <label class="row">提醒间隔 <input id="rs-int" type="number" min="5" max="240" step="5"> 分钟</label>
-    <label class="row"><input type="checkbox" id="rs-idle" checked> 长时间无操作时暂停计时</label>
-    <p class="modal-note">设置保存后立即生效。到时间会弹出全屏提醒，可以选择"再等 5 分钟"。</p>
-    <div class="modal-btns">
-      <button class="btn acc" id="rs-ok">保存</button>
-      <button class="btn ghost" id="rs-cancel">取消</button>
-    </div>
   </div>
 </div>
 
