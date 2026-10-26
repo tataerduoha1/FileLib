@@ -3114,6 +3114,10 @@ async function showJunk() {
 
 function openModal(html) {
   const m = $("#modal");
+  // 连续弹窗修复：上一次 closeModal 的 130ms 关闭动画定时器可能还挂着，
+  // 若不清除，它会在新弹窗打开后把 modal 重新藏回 hidden
+  // （表现：新建用户的第二个密码框永远不出现，且无任何报错）
+  clearTimeout(m._ct);
   $("#modal-box").innerHTML = html;
   m.classList.remove("closing");
   m.classList.remove("hidden");
