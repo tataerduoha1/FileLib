@@ -143,7 +143,12 @@ async function api(path, opts) {
     const err = new Error((data && data.error) || ("HTTP " + r.status));
     err.status = r.status;
     err.data = data;
-    if (r.status === 401 && data && data.auth === false && ME.logged) {
+    // 登录态下任何 401 = 会话已失效 → 立即回登录页。
+    // 之前要求响应体带 auth:false 才跳转，但服务端 401 响应体为空，
+    // 导致过期会话在各视图里被静默渲染成"全 0 空页"（不同设备/域名
+    // 的 Cookie 互不相通，表现就是"换个 IP 打开数据全没了"）。
+    // 登录接口本身的 401 不受影响：彼时 ME.logged 必为 false。
+    if (r.status === 401 && ME.logged) {
       ME.logged = false;
       showLogin(false);
     }
@@ -832,9 +837,18 @@ function libSuffix() {
 function setCrumb(html) { const c = $("#crumbs"); if (c) c.innerHTML = html; }
 
 async function viewHome() {
-  const st = STATS || await loadStats();
-  const lib = currentLib();
   const el = $("#grid");
+  let st;
+  try {
+    st = STATS || await loadStats();
+  } catch (e) {
+    // 统计拿不到（未登录 / 限流 / 网络抖动）不再静默渲染全 0，明确告知
+    el.className = "";
+    el.innerHTML = `<div class="empty"><div class="big">📡</div>统计数据加载失败<br>
+      <small>${esc(e.message || "网络异常")} —— 请刷新重试；若持续出现请退出重新登录</small></div>`;
+    return;
+  }
+  const lib = currentLib();
   el.className = "";
 
   let home = { star: [], continue: [], recent: [] };
@@ -4638,6 +4652,7 @@ async function openTagAdmin() {
         <option value="n">按使用数</option>
         <option value="name">按名称</option>
       </select>
+      <button class="btn small ghost" id="tg-all" title="选中当前筛选出的全部标签（再次点击取消）">全选</button>
     </div>
     <div class="tg-tabs">
       <span class="tg-tab on" data-v="all">全部</span>
@@ -4665,7 +4680,8 @@ async function openTagAdmin() {
     $("#tg-selcnt").textContent = `已选 ${M.sel.size} 个`;
   };
 
-  const render = () => {
+  /* 当前 tab + 搜索词 + 排序下的标签列表（render 与全选共用同一套过滤逻辑） */
+  const filteredTags = () => {
     let list = M.all.filter(t =>
       M.view === "all" ? true :
       M.view === "hidden" ? t.hidden :
@@ -4674,9 +4690,22 @@ async function openTagAdmin() {
       const k = M.q.toLowerCase();
       list = list.filter(t => strip(t.name).toLowerCase().includes(k));
     }
-    list = list.slice().sort(M.sort === "name"
+    return list.slice().sort(M.sort === "name"
       ? (a, b) => strip(a.name).localeCompare(strip(b.name), "zh")
       : (a, b) => (b.n - a.n) || strip(a.name).localeCompare(strip(b.name), "zh"));
+  };
+
+  /* 全选按钮文案：当前筛选结果已全部选中时变为「全不选」 */
+  const syncAllBtn = () => {
+    const b = $("#tg-all");
+    if (!b) return;
+    const list = filteredTags();
+    const allOn = list.length > 0 && list.every(t => M.sel.has(t.name));
+    b.textContent = allOn ? "全不选" : "全选";
+  };
+
+  const render = () => {
+    const list = filteredTags();
     const nU = M.all.filter(t => t.user).length;
     const nH = M.all.filter(t => t.hidden).length;
     $("#tg-count").textContent =
@@ -4698,6 +4727,7 @@ async function openTagAdmin() {
         </span></div>`;
     }).join("") : `<div class="empty">没有匹配的标签</div>`;
     syncBulk();
+    syncAllBtn();
     bindRows();
   };
 
@@ -4721,6 +4751,7 @@ async function openTagAdmin() {
     $$("#tg-list .tg-ck").forEach(ck => ck.onchange = () => {
       if (ck.checked) M.sel.add(ck.dataset.nm); else M.sel.delete(ck.dataset.nm);
       syncBulk();
+      syncAllBtn();
     });
     $$("#tg-list .tg-row").forEach(row => row.onclick = e => {
       if (e.target.closest("input,button")) return;
@@ -4764,6 +4795,13 @@ async function openTagAdmin() {
   $("#tg-q").oninput = debounce(e => { M.q = e.target.value.trim(); render(); }, 150);
   $("#tg-sort").onchange = e => { M.sort = e.target.value; render(); };
   $("#tg-clearsel").onclick = () => { M.sel.clear(); render(); };
+  $("#tg-all").onclick = () => {
+    const list = filteredTags();
+    const allOn = list.length > 0 && list.every(t => M.sel.has(t.name));
+    if (allOn) list.forEach(t => M.sel.delete(t.name));   // 全不选：只取消当前筛选出的这些
+    else list.forEach(t => M.sel.add(t.name));
+    render();
+  };
   $("#tg-hidebtn").onclick = () => bulkSetHidden(true);
   $("#tg-unhide").onclick = () => bulkSetHidden(false);
   $("#tg-del").onclick = async () => {
