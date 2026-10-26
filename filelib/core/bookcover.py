@@ -285,55 +285,65 @@ def mobi_meta(path: str) -> dict:
                     continue
 
         cover_off = None
-        if exth_flags & 0x40:
-            p = mobi_start + hdr_len
-            if rec0[p:p + 4] == b"EXTH":
-                cnt = struct.unpack(">I", rec0[p + 8:p + 12])[0]
-                q = p + 12
-                for _ in range(min(cnt, 200)):
-                    if q + 8 > len(rec0):
-                        break
-                    rtype, rlen = struct.unpack(">II", rec0[q:q + 8])
-                    payload = rec0[q + 8:q + rlen]
-                    if rtype == 100:          # author
+        p = mobi_start + hdr_len
+        # 注意：不能依赖 exth_flags 的 0x40 位——不少工具生成的 azw3/mobi
+        # flags 全 0 但 EXTH 实际存在（实测批量样本如此），直接探测魔数最稳
+        has_exth = rec0[p:p + 4] == b"EXTH"
+        if (exth_flags & 0x40 or has_exth) and has_exth:
+            cnt = struct.unpack(">I", rec0[p + 8:p + 12])[0]
+            q = p + 12
+            for _ in range(min(cnt, 200)):
+                if q + 8 > len(rec0):
+                    break
+                rtype, rlen = struct.unpack(">II", rec0[q:q + 8])
+                payload = rec0[q + 8:q + rlen]
+                if rtype == 100:          # author
+                    for e in (enc, "utf-8", "gb18030"):
+                        try:
+                            a = payload.decode(e)
+                            a = _plausible(a, 60)
+                            if a and not out.get("author"):
+                                out["author"] = a
+                            break
+                        except Exception:
+                            continue
+                elif rtype == 103:        # description
+                    for e in (enc, "utf-8", "gb18030"):
+                        try:
+                            out["description"] = _clean_text(payload.decode(e))
+                            break
+                        except Exception:
+                            continue
+                elif rtype == 101:        # publisher
+                    for e in (enc, "utf-8", "gb18030"):
+                        try:
+                            out["publisher"] = _plausible(payload.decode(e), 60)
+                            break
+                        except Exception:
+                            continue
+                elif rtype in (503, 524):  # updated title / title（full_name 指针为 0 时的书名来源）
+                    if not out.get("title"):
                         for e in (enc, "utf-8", "gb18030"):
                             try:
-                                a = payload.decode(e)
-                                a = _plausible(a, 60)
-                                if a and not out.get("author"):
-                                    out["author"] = a
+                                out["title"] = _plausible(payload.decode(e))
                                 break
                             except Exception:
                                 continue
-                    elif rtype == 103:        # description
-                        for e in (enc, "utf-8", "gb18030"):
-                            try:
-                                out["description"] = _clean_text(payload.decode(e))
-                                break
-                            except Exception:
-                                continue
-                    elif rtype == 101:        # publisher
-                        for e in (enc, "utf-8", "gb18030"):
-                            try:
-                                out["publisher"] = _plausible(payload.decode(e), 60)
-                                break
-                            except Exception:
-                                continue
-                    elif rtype in (201, 202): # cover / thumb offset
-                        if len(payload) >= 4 and rtype == 201:
-                            cover_off = struct.unpack(">I", payload[:4])[0]
-                    elif rtype == 106:        # publication date
-                        for e in (enc, "utf-8"):
-                            try:
-                                mm = re.search(r"(19|20)\d{2}", payload.decode(e))
-                                if mm:
-                                    out["year"] = int(mm.group(0))
-                                break
-                            except Exception:
-                                continue
-                    q += rlen
+                elif rtype in (201, 202): # cover / thumb offset
+                    if len(payload) >= 4 and rtype == 201:
+                        cover_off = struct.unpack(">I", payload[:4])[0]
+                elif rtype == 106:        # publication date
+                    for e in (enc, "utf-8"):
+                        try:
+                            mm = re.search(r"(19|20)\d{2}", payload.decode(e))
+                            if mm:
+                                out["year"] = int(mm.group(0))
+                            break
+                        except Exception:
+                            continue
+                q += rlen
 
-        # EXTH 封面偏移 → 从该 record 里找完整 JPEG
+        # EXTH 封面偏移 → 从该 record 里找完整 JPEG（0 = 未指定，跳过走逐 record 兜底）
         if cover_off is not None and 0 < cover_off < len(offs):
             start = offs[cover_off]
             end = offs[cover_off + 1] if cover_off + 1 < len(offs) else os.path.getsize(path)
@@ -353,7 +363,10 @@ def mobi_meta(path: str) -> dict:
     if out.get("cover"):
         return out
 
-    # 兜底：扫描前 60 个 record，找第一张体积够大的图片（部分 mobi 不写 EXTH 201）
+    # 兜底：EXTH 201 缺失/为 0 时逐 record 探测图片签名，取第一张大图。
+    # （旧版只盲扫前 60 条，而 azw3 的文本区动辄上百条 record，封面资源
+    #   排在其后，永远扫不到；文本 record 是 PalmDOC 压缩数据，不会以
+    #   JPEG/PNG 签名开头，逐条读 4 字节判断既准又快。）
     try:
         size = os.path.getsize(path)
         with open(path, "rb") as f2:
@@ -365,12 +378,16 @@ def mobi_meta(path: str) -> dict:
                 if len(b) < 8:
                     break
                 offs.append(struct.unpack(">I", b[:4])[0])
-            for i in range(1, min(len(offs), 60)):
+            for i in range(1, len(offs)):
                 start = offs[i]
                 end = offs[i + 1] if i + 1 < len(offs) else size
                 if end - start < 3000:
                     continue
                 f2.seek(start)
+                sig = f2.read(8)
+                if not (sig.startswith(b"\xff\xd8\xff") or sig.startswith(b"\x89PNG\r\n\x1a\n")):
+                    continue
+                f2.seek(start)   # 回到 record 起点：sig 读取推进了文件位置，直接续读会切掉 SOI 头
                 blob = f2.read(min(end - start, 4 << 20))
                 img = _first_image(blob)
                 if img and len(img) > 3000:

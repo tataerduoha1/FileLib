@@ -2303,12 +2303,15 @@ class Handler(BaseHTTPRequestHandler):
     def _api_tag_admin(self):
         """标签管理：创建/改名/删除/合并/隐藏（admin）。"""
         self._admin()
+        me = self._user()
+        ip = sec.client_ip(self)
         body = self._body()
         act = body.get("action")
         if act == "create":
             name = sec.safe_name(str(body.get("name") or ""), 40)
             if not name:
                 return self._err(400, "标签名不能为空")
+            users_mod.audit(self.store.rw, me, ip, "tag.create", name)
             return self._json(self.store.tag_create(name, str(body.get("color") or "")))
         if act == "rename":
             old = sec.safe_name(str(body.get("old") or ""), 40)
@@ -2319,6 +2322,7 @@ class Handler(BaseHTTPRequestHandler):
                 "SELECT grp FROM tags WHERE name=?", (old,)).fetchone()
             if row and row["grp"] == "auto":
                 return self._err(400, "自动标签由系统生成，不能改名（可删除，或合并到人工标签）")
+            users_mod.audit(self.store.rw, me, ip, "tag.rename", f"{old} → {new}")
             return self._json({"ok": self.store.tag_rename(old, new)})
         if act == "merge":
             src = sec.safe_name(str(body.get("src") or ""), 40)
@@ -2326,18 +2330,25 @@ class Handler(BaseHTTPRequestHandler):
             if not src or not dst:
                 return self._err(400, "合并参数缺失")
             try:
-                return self._json(self.store.tag_merge(src, dst))
+                r = self.store.tag_merge(src, dst)
             except ValueError as e:
                 return self._err(400, str(e))
+            users_mod.audit(self.store.rw, me, ip, "tag.merge", f"{src} → {dst}")
+            return self._json(r)
         if act == "hide":
             name = sec.safe_name(str(body.get("name") or ""), 40)
             if not name:
                 return self._err(400, "标签名不能为空")
-            self.store.tag_set_hidden([name], bool(body.get("on", True)))
+            on = bool(body.get("on", True))
+            self.store.tag_set_hidden([name], on)
+            users_mod.audit(self.store.rw, me, ip, "tag.hide" if on else "tag.unhide", name)
             return self._json({"ok": True})
         if act == "delete":
             name = sec.safe_name(str(body.get("name") or ""), 40)
-            return self._json({"ok": self.store.tag_delete(name)})
+            r = self.store.tag_delete(name)
+            if r:
+                users_mod.audit(self.store.rw, me, ip, "tag.delete", name)
+            return self._json({"ok": r})
         return self._err(400, "未知操作")
 
     def _api_progress(self, u: dict):

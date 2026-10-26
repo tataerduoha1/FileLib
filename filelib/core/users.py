@@ -336,7 +336,14 @@ def list_users(conn) -> list[dict]:
 def update(conn, uid: int, *, perms=None, role=None, password=None,
            disabled=None, note=None, nav=None) -> dict | None:
     if perms is not None:
-        plist = sorted(set(int(v) for v in perms))
+        # API 边界入参净化：跳过 None / 非数字项，畸形请求不该打 500
+        pv: set[int] = set()
+        for v in perms:
+            try:
+                pv.add(int(v))
+            except (TypeError, ValueError):
+                continue
+        plist = sorted(pv)
         conn.execute("UPDATE users SET perms=? WHERE id=?",
                      (json.dumps(plist), uid))
         # 同步清理导航授权行：can_see 只看 user_perms 表，

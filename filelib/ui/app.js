@@ -81,6 +81,29 @@ const MARK_LABEL = { star: "⭐ 收藏", read: "✅ 已读", todo: "📌 待读"
 const MARK_ICON = { star: "⭐", read: "✅", todo: "📌" };
 const READER_EXT = ["txt", "md", "markdown", "pdf", "epub", "mobi", "azw3", "azw", "prc", "fb2"];
 
+/* 操作审计：动作代号 → 中文（未知的原样显示，前缀 user./tag. 归类） */
+const ACT_LABEL = {
+  setup: "初始化",
+  "user.add": "新建用户", "user.pass": "修改密码", "user.del": "删除用户",
+  "user.perms": "调整库权限", "user.nav": "调整导航权限", "user.role": "调整角色",
+  "user.disable": "停用/启用", "user.note": "修改备注",
+  "settings.save": "保存设置",
+  "library.rename": "重命名库", "library.drop": "移除库",
+  cleanup: "数据清理", scan: "扫描入库", organize: "整理文件",
+  "cover.build": "生成封面", "thumb.recompress": "缩略图重压缩",
+  "fulltext.build": "全文索引", "autotag.build": "生成自动标签", "autotag.clear": "清空自动标签",
+  "rate.reset": "重置限流",
+  "file.recycle": "移入回收站", "file.mkdir": "新建文件夹",
+  "tag.create": "新建标签", "tag.rename": "重命名标签", "tag.merge": "合并标签",
+  "tag.hide": "隐藏标签", "tag.unhide": "取消隐藏标签", "tag.delete": "删除标签",
+};
+function actLabel(a) {
+  if (ACT_LABEL[a]) return ACT_LABEL[a];
+  if (a.startsWith("user.")) return "用户管理：" + a.slice(5);
+  if (a.startsWith("tag.")) return "标签：" + a.slice(4);
+  return a;
+}
+
 /* ---------------- 小工具 ---------------- */
 
 function fmtSize(n) {
@@ -3982,8 +4005,9 @@ async function adminLogs(el) {
       box.innerHTML = `<table class="admtable"><thead><tr><th style="width:150px">时间</th>
         <th style="width:120px">用户</th><th style="width:150px">动作</th><th>详情</th>
         <th style="width:130px">IP</th></tr></thead><tbody>
-        ${(r.audit || []).map(a => `<tr><td>${fmtTime(a.ts)}</td><td>${esc(a.username || "-")}</td>
-          <td>${esc(a.action || "")}</td><td><small>${esc((a.detail || "").slice(0, 160))}</small></td>
+        ${(r.audit || []).map(a => `<tr><td>${fmtTime(a.ts)}</td><td>${esc(a.user || "-")}</td>
+          <td title="${esc(a.act || "")}">${esc(actLabel(a.act || ""))}</td>
+          <td><small>${esc((a.detail || "").slice(0, 160))}</small></td>
           <td><small>${esc(a.ip || "")}</small></td></tr>`).join("")
           || `<tr><td colspan="5"><small style="color:var(--fg2)">暂无记录</small></td></tr>`}
         </tbody></table>`;
