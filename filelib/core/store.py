@@ -246,14 +246,21 @@ class Store:
 
     def all_tags(self, vol_id: int | None = None, q: str = "",
                  limit: int = 100, show_hidden: bool = False,
-                 include_empty: bool = False) -> dict[str, Any]:
+                 include_empty: bool = False,
+                 user_only: bool | None = None) -> dict[str, Any]:
         """标签聚合（带文件数）。vol_id 过滤到具体库。进数据版本缓存。
         show_hidden=True 时连被隐藏的标签一起返回（带 hidden 标记），标签管理器用。
         include_empty=True 时零关联标签（刚新建、还没挂到任何文件）也返回，
-        否则标签管理器里「新建标签」后立刻搜索会找不到，像是没建成一样。"""
+        否则标签管理器里「新建标签」后立刻搜索会找不到，像是没建成一样。
+        user_only=True/False 只返回人工/自动标签——侧栏的「人工/自动」tab
+        必须用这个把过滤下推到服务端：自动标签动辄几百上千个 n=1~2 的，
+        LIMIT 截断后前端再过滤就只剩 auto: 了（真实事故：人工标签在
+        「人工」tab 下永远看不到）。"""
         return cache.cached(
-            f"tags:{vol_id}:{q}:{limit}:{int(show_hidden)}:{int(include_empty)}",
-            lambda: self._all_tags(vol_id, q, limit, show_hidden, include_empty))
+            f"tags:{vol_id}:{q}:{limit}:{int(show_hidden)}:{int(include_empty)}:"
+            f"{-1 if user_only is None else (1 if user_only else 0)}",
+            lambda: self._all_tags(vol_id, q, limit, show_hidden, include_empty,
+                                   user_only))
 
     # 隐藏标签名单存在 settings 里（JSON 名单）。隐藏 ≠ 删除：
     # 只是不再出现在侧栏/聚合里，文件筛选与「详情-标签」仍然可见可用。
@@ -315,8 +322,19 @@ class Store:
 
     def _all_tags(self, vol_id: int | None = None, q: str = "",
                   limit: int = 100, show_hidden: bool = False,
-                  include_empty: bool = False) -> dict[str, Any]:
+                  include_empty: bool = False,
+                  user_only: bool | None = None) -> dict[str, Any]:
         hidden = set(self.hidden_tags())
+        # user_only 的 HAVING：聚合后按「grp 或 关联来源」过滤，
+        # 必须在 LIMIT 之前完成，否则截断后再过滤就不对了
+        if user_only is True:
+            having = (" HAVING (MAX(CASE WHEN ft.source='user' THEN 1 ELSE 0 END)=1 "
+                      "OR t.grp='user')")
+        elif user_only is False:
+            having = (" HAVING (MAX(CASE WHEN ft.source='user' THEN 1 ELSE 0 END)=0 "
+                      "AND t.grp!='user')")
+        else:
+            having = ""
         # 文件侧过滤（present / 库范围）：include_empty 时放进 LEFT JOIN 的 ON 里，
         # 不能进 WHERE——进 WHERE 会把没匹配上文件的行剔掉，LEFT JOIN 退化回 INNER。
         fwhere = ["f.status = 'present'"]
@@ -332,10 +350,17 @@ class Store:
             twhere = "1=1"
             tparams = []
         if include_empty:
-            # 零关联标签也返回（管理器场景）：n=0，排在最后
-            total = self.conn.execute(
-                "SELECT COUNT(*) n FROM tags t WHERE " + twhere,
-                tparams).fetchone()["n"]
+            # 零关联标签也返回（管理器场景）：n=0，排在最后。
+            # user_only 过滤时零关联标签按 grp 判定，total 用 HAVING 计数
+            if user_only is None:
+                total = self.conn.execute(
+                    "SELECT COUNT(*) n FROM tags t WHERE " + twhere,
+                    tparams).fetchone()["n"]
+            else:
+                op = "=" if user_only else "!="
+                total = self.conn.execute(
+                    "SELECT COUNT(*) n FROM tags t WHERE t.grp " + op + " 'user' AND "
+                    + twhere, tparams).fetchone()["n"]
             rows = self.conn.execute(
                 "SELECT t.id, t.name, t.grp, "
                 "COUNT(DISTINCT CASE WHEN f.id IS NOT NULL THEN ft.file_id END) n, "
@@ -343,7 +368,8 @@ class Store:
                 "FROM tags t LEFT JOIN file_tags ft ON ft.tag_id = t.id "
                 "LEFT JOIN files f ON f.id = ft.file_id AND " + fsql + " "
                 "WHERE " + twhere + " "
-                "GROUP BY t.id ORDER BY n DESC, t.name LIMIT ?",
+                "GROUP BY t.id" + having + " "
+                "ORDER BY n DESC, t.name LIMIT ?",
                 tparams + fparams + [limit]).fetchall()
         else:
             # 原行为：只列有 present 关联的标签（侧栏 / 建议词场景）
@@ -366,7 +392,8 @@ class Store:
                 "MAX(CASE WHEN ft.source = 'user' THEN 1 ELSE 0 END) is_user "
                 "FROM tags t JOIN file_tags ft ON ft.tag_id = t.id "
                 "JOIN files f ON f.id = ft.file_id WHERE " + wsql + " "
-                "GROUP BY t.id ORDER BY n DESC, t.name LIMIT ?",
+                "GROUP BY t.id" + having + " "
+                "ORDER BY n DESC, t.name LIMIT ?",
                 params + [limit]).fetchall()
         # 范围内 present 文件总数：算标签覆盖率（泛化判定）用
         dsql = ("SELECT COUNT(*) n FROM files f WHERE f.status='present'"

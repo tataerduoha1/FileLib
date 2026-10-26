@@ -978,11 +978,16 @@ class Handler(BaseHTTPRequestHandler):
         vol = self._vol_for("tags")
         if vol == -1:
             return self._json({"total": 0, "items": []})
+        # user=1/0：只返回人工/自动标签（侧栏 tab 过滤下推，避免 LIMIT 截断
+        # 后前端再过滤把人工标签挤没）
+        uv = self._q1("user", "")
+        user_only = True if uv == "1" else False if uv == "0" else None
         return self._json(self.store.all_tags(
             vol_id=vol, q=(self._q1("q", "") or "").strip(),
             limit=sec.clamp_int(self._q1("limit", "200"), 1, 2000, 200),
             show_hidden=self._q1("show_hidden", "") == "1",
-            include_empty=self._q1("empty", "") == "1"))
+            include_empty=self._q1("empty", "") == "1",
+            user_only=user_only))
 
     # ---------- 全文搜索 ----------
 

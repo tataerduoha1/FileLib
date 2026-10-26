@@ -483,24 +483,25 @@ async function loadTags() {
   const el = $("#nav-tags");
   if (!el) return;
   try {
-    // limit=300：以前 40 会导致「详情页刚加的标签」（使用数 1）排不进
-    // 前 40 名，侧栏「人工」下永远看不到，标签管理器里却搜得到
-    const r = await api(withVol("/api/tags?limit=300"));
-    const items = r.items || [];
+    // 「人工/自动」过滤下推到服务端（user=1/0）：以前前端在 LIMIT 之后过滤，
+    // 而自动标签动辄几百上千个 n=1 的，LIMIT 300 也全被 auto: 占满，
+    // 人工标签永远排不进返回名单——「人工」tab 下一个都看不到
     const f = TAGS_VIEW;
-    const shown = items.filter(t => f === "all" || (f === "user" ? t.user : !t.user));
+    const uf = f === "user" ? "&user=1" : f === "auto" ? "&user=0" : "";
+    const r = await api(withVol(`/api/tags?limit=40${uf}`));
+    const shown = r.items || [];      // 服务端已按 tab 过滤
     const bar = `<li class="tagfilter">
       <span class="tf-item ${f === "all" ? "on" : ""}" data-tf="all">全部</span>
       <span class="tf-item ${f === "user" ? "on" : ""}" data-tf="user">人工</span>
       <span class="tf-item ${f === "auto" ? "on" : ""}" data-tf="auto">自动</span>
-      ${isAdmin() && items.some(t => !t.user)
+      ${isAdmin() && shown.some(t => !t.user)
         ? `<a class="tf-clear" id="btn-autotag-clear" title="清空全部自动标签（人工标签不受影响）">清空自动</a>` : ""}
     </li>`;
     el.innerHTML = bar + (shown.length
       ? shown.map(t => `<li data-tag="${esc(t.name)}" class="${selTags().includes(t.name) ? "active" : ""}">
           <span>🏷 ${esc(String(t.name).replace(/^auto:/, ""))}${t.user ? "" : " <small>自动</small>"}</span>
           <span class="n">${(t.n || 0).toLocaleString()}</span></li>`).join("")
-      : `<li class="dim">${items.length ? "该类型下暂无标签" : "暂无标签（详情里可添加）"}</li>`);
+      : `<li class="dim">${f === "all" ? "暂无标签（详情里可添加）" : "该类型下暂无标签"}</li>`);
     $$("#nav-tags li[data-tag]").forEach(li => li.onclick = () => {
       const cur = selTags();                          // 多选：点已选的取消，未选的追加
       const i = cur.indexOf(li.dataset.tag);
