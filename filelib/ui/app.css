@@ -1494,6 +1494,11 @@ details.navdetail > summary::-webkit-details-marker { display: none; }
 
 /* ---------------- 标签管理器（admin） ---------------- */
 .tg-top { display: flex; gap: 8px; margin-bottom: 8px; }
+.modal h2 small#tg-scope {
+  display: block; font-size: 12px; font-weight: normal; color: var(--fg2);
+  margin-top: 4px;
+}
+.modal h2 small#tg-scope b { color: var(--acc); font-weight: 600; }
 .tg-top input, .tg-top select {
   height: 30px; padding: 0 9px; background: var(--bg3);
   border: 1px solid var(--line); border-radius: 7px;

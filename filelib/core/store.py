@@ -325,16 +325,15 @@ class Store:
                   include_empty: bool = False,
                   user_only: bool | None = None) -> dict[str, Any]:
         hidden = set(self.hidden_tags())
-        # user_only 的 HAVING：聚合后按「grp 或 关联来源」过滤，
-        # 必须在 LIMIT 之前完成，否则截断后再过滤就不对了
+        # HAVING 条件集合（聚合后过滤，必须在 LIMIT 之前完成）：
+        # user_only 按「grp 或 关联来源」过滤人工/自动
+        hcon: list[str] = []
         if user_only is True:
-            having = (" HAVING (MAX(CASE WHEN ft.source='user' THEN 1 ELSE 0 END)=1 "
-                      "OR t.grp='user')")
+            hcon.append("MAX(CASE WHEN ft.source='user' THEN 1 ELSE 0 END)=1 "
+                        "OR t.grp='user'")
         elif user_only is False:
-            having = (" HAVING (MAX(CASE WHEN ft.source='user' THEN 1 ELSE 0 END)=0 "
-                      "AND t.grp!='user')")
-        else:
-            having = ""
+            hcon.append("MAX(CASE WHEN ft.source='user' THEN 1 ELSE 0 END)=0 "
+                        "AND t.grp!='user'")
         # 文件侧过滤（present / 库范围）：include_empty 时放进 LEFT JOIN 的 ON 里，
         # 不能进 WHERE——进 WHERE 会把没匹配上文件的行剔掉，LEFT JOIN 退化回 INNER。
         fwhere = ["f.status = 'present'"]
@@ -349,22 +348,41 @@ class Store:
         else:
             twhere = "1=1"
             tparams = []
+        # 库视角（vol_id 非 None）下 include_empty 的正确语义：
+        # 「本库使用的标签 + 全局零关联的标签」。
+        # 以前 LEFT JOIN 会把其他库的标签也以 n=0 带出来——空库里
+        # 打开管理器看到的全是别家库的标签（多库用户实测反馈）。
+        # 全局零关联（哪里都没用过，如刚新建）仍返回，保住
+        # 「新建标签后立刻能搜到」的闭环。used_global 用相关子查询判定。
         if include_empty:
-            # 零关联标签也返回（管理器场景）：n=0，排在最后。
-            # user_only 过滤时零关联标签按 grp 判定，total 用 HAVING 计数
-            if user_only is None:
+            if vol_id is None:
+                # 全库视角：所有标签都返回（含全局零关联）
+                gsel = ""
                 total = self.conn.execute(
                     "SELECT COUNT(*) n FROM tags t WHERE " + twhere,
                     tparams).fetchone()["n"]
             else:
-                op = "=" if user_only else "!="
+                # 库视角：本库使用的 + 全局零关联的（见上方语义注释）
+                gsel = (", EXISTS(SELECT 1 FROM file_tags gx JOIN files gf "
+                        "ON gf.id = gx.file_id AND gf.status='present' "
+                        "WHERE gx.tag_id = t.id) used_global")
+                hcon.append("used_in_vol = 1 OR used_global = 0")
                 total = self.conn.execute(
-                    "SELECT COUNT(*) n FROM tags t WHERE t.grp " + op + " 'user' AND "
-                    + twhere, tparams).fetchone()["n"]
+                    "SELECT COUNT(*) n FROM tags t WHERE " + twhere + " AND ("
+                    "EXISTS(SELECT 1 FROM file_tags tx JOIN files tf "
+                    "ON tf.id = tx.file_id AND tf.status='present' AND tf.vol_id=? "
+                    "WHERE tx.tag_id = t.id) "
+                    "OR NOT EXISTS(SELECT 1 FROM file_tags tx JOIN files tf "
+                    "ON tf.id = tx.file_id AND tf.status='present' "
+                    "WHERE tx.tag_id = t.id))",
+                    tparams + [vol_id]).fetchone()["n"]
+            having = " HAVING (" + ") AND (".join(hcon) + ")" if hcon else ""
             rows = self.conn.execute(
                 "SELECT t.id, t.name, t.grp, "
                 "COUNT(DISTINCT CASE WHEN f.id IS NOT NULL THEN ft.file_id END) n, "
+                "MAX(CASE WHEN f.id IS NOT NULL THEN 1 ELSE 0 END) used_in_vol, "
                 "MAX(CASE WHEN ft.source = 'user' THEN 1 ELSE 0 END) is_user "
+                + gsel + " "
                 "FROM tags t LEFT JOIN file_tags ft ON ft.tag_id = t.id "
                 "LEFT JOIN files f ON f.id = ft.file_id AND " + fsql + " "
                 "WHERE " + twhere + " "
@@ -387,6 +405,7 @@ class Store:
                 "JOIN file_tags ft ON ft.tag_id = t.id "
                 "JOIN files f ON f.id = ft.file_id WHERE " + wsql,
                 params).fetchone()["n"]
+            having = " HAVING (" + ") AND (".join(hcon) + ")" if hcon else ""
             rows = self.conn.execute(
                 "SELECT t.id, t.name, t.grp, COUNT(DISTINCT ft.file_id) n, "
                 "MAX(CASE WHEN ft.source = 'user' THEN 1 ELSE 0 END) is_user "

@@ -4673,7 +4673,15 @@ function bindUI() {
 async function openTagAdmin(initialQ = "") {
   const M = { view: "all", sort: "n", q: String(initialQ || "").trim(), sel: new Set(), all: [] };
   const strip = s => String(s).replace(/^auto:/, "");
-  openModal(`<h2>🏷 标签管理器</h2>
+  // 管理范围随当前库：库视角只看「本库使用 + 全局未用」的标签，
+  // 全部资料库看全部——标题明示范围，避免误以为看到的是全库数据
+  const curLib = state.volId == null ? null
+    : (state.libs || []).find(l => l.id === state.volId);
+  const libName = curLib ? (curLib.label || curLib.name || "") : "";
+  const scope = libName
+    ? `当前管理：<b>${esc(libName)}</b>（切到「全部资料库」可管理全部标签）`
+    : "当前管理：全部资料库";
+  openModal(`<h2>🏷 标签管理器 <small id="tg-scope">${scope}</small></h2>
     <div class="tg-top">
       <input type="text" id="tg-q" placeholder="搜索标签…" autocomplete="off" spellcheck="false">
       <select id="tg-sort">
