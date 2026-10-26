@@ -207,10 +207,12 @@ const THEMES = [
 ];
 const THEME_MAP = Object.fromEntries(THEMES.map(t => [t.id, t]));
 
-function applyTheme(t) {
+function applyTheme(t, persist = true) {
   if (!THEME_MAP[t]) t = "light";
   document.body.dataset.theme = t;
-  try { localStorage.setItem("filelib.theme", t); } catch {}
+  if (persist) {
+    try { localStorage.setItem("filelib.theme", t); } catch {}
+  }
   const btn = $("#btn-theme");
   if (btn) {
     btn.textContent = THEME_MAP[t].icon;
@@ -425,6 +427,20 @@ async function loadStats(silent) {
   STATS = st;
   state.libs = st.volumes || [];
 
+  // 后台默认设置桥接（随 /api/stats 下发）：休息提醒 / 默认主题 / 站点名。
+  // 个人覆盖永远优先：右上角 🧘 设过个人值、或手动切过主题的，不受后台默认影响。
+  const stg = st.settings || {};
+  if (stg.rest_remind !== undefined) applyRestDefaults(stg);
+  if (stg.theme) {
+    let hasTheme = false;
+    try { hasTheme = !!localStorage.getItem("filelib.theme"); } catch {}
+    if (!hasTheme) applyTheme(stg.theme, false);   // 默认主题不落 localStorage
+  }
+  if (stg.site_name) {
+    $("#brand-name").textContent = stg.site_name;
+    document.title = stg.site_name + " · 本地资料库";
+  }
+
   const vis = visibleLibs();
   if (state.volId != null && !vis.some(l => l.id === state.volId)) {
     state.volId = vis[0] ? vis[0].id : null;
@@ -629,11 +645,9 @@ function markActive() {
     li.classList.toggle("active", selTags().includes(li.dataset.tag)));
   $$("#nav-tree li.tnode").forEach(li =>
     li.classList.toggle("active", li.dataset.rel === state.dir && state.view === "list"));
-  // 顶栏场景按钮：📦 打包下载只在文件列表里有意义；📁＋ 新建文件夹需要库上下文
+  // 顶栏场景按钮：📦 打包下载只在文件列表里有意义
   const bz = $("#btn-zip");
   if (bz) bz.classList.toggle("hidden", !(state.view === "list" && !state.fulltext));
-  const bn = $("#btn-newdir");
-  if (bn) bn.classList.toggle("hidden", !(isAdmin() && state.volId != null));
   // 当前视图落在某个折叠组里时自动展开它（否则高亮项被藏起来用户会懵）
   const act = $("#sec-main li[data-nav].active");
   if (act) {
@@ -3235,17 +3249,22 @@ function startRest() {
     }
   }, 5000);
 }
-function loadRest() {
-  let cfg = null;
-  try { cfg = JSON.parse(localStorage.getItem("filelib.rest") || "null"); } catch {}
-  if (cfg) {
-    REST.on = !!cfg.on;
-    REST.interval = cfg.interval || 45;
-    REST.idlePause = cfg.idle !== false;
+function applyRestDefaults(st) {
+  // 两处入口的联动语义：管理后台的「休息提醒」是全体默认值，
+  // 右上角面板保存过的是本机个人覆盖（localStorage），个人覆盖优先。
+  let personal = null;
+  try { personal = JSON.parse(localStorage.getItem("filelib.rest") || "null"); } catch {}
+  if (personal) {
+    REST.on = !!personal.on;
+    REST.interval = personal.interval || 45;
+    REST.idlePause = personal.idle !== false;
+  } else if (st && st.rest_remind !== undefined) {
+    REST.on = !!st.rest_remind;
+    REST.interval = st.rest_interval_min || 45;
+    REST.idlePause = st.idle_pause !== false;
   }
   const b = $("#btn-rest");
   if (b) b.title = REST.on ? `休息提醒：每 ${REST.interval} 分钟` : "休息提醒（未开启）";
-  startRest();
 }
 
 /* ---------------- 快捷键帮助 ---------------- */
@@ -3906,7 +3925,7 @@ async function adminSettings(el) {
           <input type="checkbox" id="s-scan-temp" ${chk(s.scan_temp_enabled)}></div>
         <div class="setrow"><label>间隔（分钟）</label>
           <input type="number" id="s-scan-int" min="5" max="1440" value="${s.scan_temp_interval_min || 30}"></div>
-        <div class="set-note">定时扫描只在程序运行时生效，且不会和手动任务打架。</div>
+        <div class="set-note">保存后立即生效：到点/到间隔就按新设置跑（程序运行期间才会执行扫描）。</div>
       </div>
       <div class="setcard">
         <h3>💾 备份</h3>
@@ -3914,7 +3933,7 @@ async function adminSettings(el) {
           <input type="checkbox" id="s-backup" ${chk(s.auto_backup)}></div>
         <div class="setrow"><label>保留份数</label>
           <input type="number" id="s-keep" min="1" max="20" value="${s.backup_keep || 3}"></div>
-        <div class="set-note">备份放在 <code>${esc(s.data_dir || "")}\\backups\\</code>，
+        <div class="set-note">保存后立即生效。备份放在 <code>${esc(s.data_dir || "")}\\backups\\</code>，
           超过份数的最旧文件自动删除。</div>
       </div>
       <div class="setcard">
@@ -3923,7 +3942,7 @@ async function adminSettings(el) {
           <input type="checkbox" id="s-rest" ${chk(s.rest_remind)}></div>
         <div class="setrow"><label>间隔（分钟）</label>
           <input type="number" id="s-rest-int" min="5" max="240" step="5" value="${s.rest_interval_min || 45}"></div>
-        <div class="set-note">每个用户在右上角 🧘 里也能单独调。</div>
+        <div class="set-note">这里是全体默认值，保存后立即生效；用户在右上角 🧘 设过的以个人设置为准。</div>
       </div>
       <div class="setcard">
         <h3>⚙ 界面</h3>
@@ -3932,12 +3951,13 @@ async function adminSettings(el) {
         <div class="setrow"><label>默认主题</label>
           <select id="s-theme">${THEMES.map(t =>
             `<option value="${t.id}" ${s.theme === t.id ? "selected" : ""}>${t.icon} ${t.name}</option>`).join("")}</select></div>
+        <div class="set-note">保存后重新打开页面生效。用户自己切过主题的以个人选择为准。</div>
       </div>
       <div class="setcard">
         <h3>🔒 限流</h3>
         <div class="setrow"><label>普通用户每分钟请求数</label>
           <input type="number" id="s-rate" min="30" max="6000" value="${s.rate_limit_user || 600}"></div>
-        <div class="set-note">管理员不受限。防止普通账号疯狂刷新拖垮程序。</div>
+        <div class="set-note">保存后立即生效（无需重启）。管理员不受限，防止普通账号疯狂刷新拖垮程序。</div>
       </div>
       <div class="setcard">
         <h3>🧩 环境</h3>
@@ -3978,6 +3998,9 @@ async function adminSettings(el) {
       await api("/api/admin/settings", post(body));
       $("#brand-name").textContent = body.site_name;
       document.title = body.site_name + " · 本地资料库";
+      // 本机立即采用刚保存的后台默认值（若本机设过个人覆盖则个人覆盖仍优先）
+      applyRestDefaults({ rest_remind: body.rest_remind,
+        rest_interval_min: body.rest_interval_min, idle_pause: true });
       toast("设置已保存");
     } catch (e) { alert(e.message); }
   };
@@ -4256,17 +4279,6 @@ function bindUI() {
     qs.set("limit", "100");
     toast("开始打包（≤100 个 / 2GB），完成后浏览器自动保存", 2800);
     location.href = "/download_zip?" + qs.toString();
-  };
-  $("#btn-newdir").onclick = async () => {
-    if (state.volId == null) return toast("请先选择一个资料库");
-    const name = await uiPrompt("新建文件夹",
-      { hint: `位置：${state.dir || "资料库根目录"}`, placeholder: "文件夹名称" });
-    if (!name || !name.trim()) return;
-    try {
-      const r = await api("/api/fm_mkdir", post({ vol: state.volId, rel: state.dir || "", name: name.trim() }));
-      toast(`已创建文件夹「${r.name}」`);
-      loadTree().catch(() => {});
-    } catch (e) { toast(e.message, 2600); }
   };
   $("#toolsmenu").onclick = e => e.stopPropagation();
   $("#lib-current").onclick = e => {
@@ -4604,6 +4616,9 @@ function bindUI() {
     $("#rs-int").value = REST.interval;
     $("#rs-idle").checked = REST.idlePause;
     $("#restset").classList.remove("hidden");
+    // 打开即全选间隔值：直接键入就能覆盖旧值，避免出现 45+20=4520 这类拼接
+    try { $("#rs-int").select(); } catch {}
+    $("#rs-int").focus();
   };
   $("#rs-cancel").onclick = () => $("#restset").classList.add("hidden");
   $("#rs-ok").onclick = () => {
@@ -4902,8 +4917,9 @@ async function openTagAdmin(initialQ = "") {
 }
 
 async function boot() {
-  loadRest();
-  applyTheme(document.body.dataset.theme || "light");
+  startRest();
+  // 初始主题不落 localStorage：先把后台默认主题的机会留给 loadStats 桥接
+  applyTheme(document.body.dataset.theme || "light", false);
   try { RD.fontSize = +(localStorage.getItem("filelib.font") || 17) || 17; } catch {}
 
   try {

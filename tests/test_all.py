@@ -660,7 +660,7 @@ def main():
     c, d, _ = A.post("/api/admin/users", {"action": "add", "username": "a", "password": "1"})
     ck("非法用户名/弱密码被拒", c == 400, str(c))
 
-    h("17b. 文件管理与分享（新建文件夹 / 实时目录 / 分享链接 / 打包下载）")
+    h("17b. 文件管理与分享（实时目录 / 分享链接 / 打包下载）")
     c, d, _ = A.get(f"/api/fm_dirs?vol={vid}&rel=")
     ck("fm_dirs 200", c == 200 and isinstance(d.get("dirs"), list), f"{c} {str(d)[:80]}")
     c, d, _ = A.get("/api/fm_dirs?vol=99999&rel=")
@@ -668,64 +668,14 @@ def main():
     c, d, _ = A.get(f"/api/fm_dirs?vol={vid}&rel=" + q(rel="../../etc"))
     ck("fm_dirs 穿越 rel 被拒", c in (400, 404), str(c))
 
-    # mkdir 会真实写磁盘：注册一个 Temp 下的临时测试卷来跑，
-    # 既不污染真实资料库，也避免服务进程对受保护目录无写权限的环境问题。
-    import shutil
+    import shutil   # 后面缩略图测试的临时卷清理还要用
     import tempfile
-    mvid = None
-    tmp_root = os.path.join(tempfile.gettempdir(), f"fltest_vol_{int(time.time())}")
-    try:
-        os.makedirs(os.path.join(tmp_root, "sub"))
-        with open(os.path.join(tmp_root, "a.txt"), "w", encoding="utf-8") as f:
-            f.write("hello filelib\n" * 20)
-        with open(os.path.join(tmp_root, "sub", "b.txt"), "w", encoding="utf-8") as f:
-            f.write("world\n")
-        c, d, _ = A.post("/api/scan", {"root": tmp_root})
-        if c == 200:
-            for _ in range(60):
-                time.sleep(0.5)
-                c, t, _ = A.get("/api/task")
-                t = t or {}
-                if t.get("name") == "scan" and t.get("state") != "running":
-                    break
-            c, st, _ = A.get("/api/stats")
-            for v in st.get("volumes") or []:
-                if os.path.normcase(str(v.get("root") or "")) == os.path.normcase(tmp_root):
-                    mvid = v["id"]
-                    break
-    except Exception as ex:
-        print(f"  （注册测试卷异常：{type(ex).__name__}: {ex}）")
-    ck("注册可写测试卷", mvid is not None, f"root={tmp_root}")
-
-    MV = mvid
-    mk = f"zz_test_dir_{int(time.time())}"
-    if MV:
-        c, d, _ = A.post("/api/fm_mkdir", {"vol": MV, "rel": "", "name": mk})
-        ck("新建文件夹 200", c == 200 and d.get("ok"), f"{c} {str(d)[:80]}")
-        ck("返回规范 rel", d.get("rel") == mk + "/", str(d.get("rel")))
-        c, d, _ = A.get(f"/api/fm_dirs?vol={MV}&rel=")
-        ck("新建目录立即可见（实时列举）", any(x["name"] == mk for x in d.get("dirs", [])), mk)
-        c, d, _ = A.post("/api/fm_mkdir", {"vol": MV, "rel": "", "name": mk})
-        ck("重名新建 → 409", c == 409, str(c))
-        c, d, _ = A.get(f"/api/dirtree?vol={MV}")
-        ck("新建目录进入目录树", any(n.get("name") == mk for n in d.get("nodes", [])), mk)
-    else:
-        for nm in ("新建文件夹 200", "返回规范 rel", "新建目录立即可见（实时列举）",
-                   "重名新建 → 409", "新建目录进入目录树"):
-            sk(nm, "无法注册可写测试卷")
-    # 校验类用例不落盘，任意卷都可跑
+    # 「在当前目录新建文件夹」已于 v1.0.16 整体下线（右上角按钮 + 端点），
+    # 旧端点保留路由统一返回 404，让旧缓存页面得到明确提示而不是静默失败。
+    c, d, _ = A.post("/api/fm_mkdir", {"vol": vid, "rel": "", "name": "zz_removed"})
+    ck("已下线 mkdir → 404", c == 404, str(c))
     c, d, _ = A.post("/api/fm_mkdir", {"vol": vid, "rel": "..", "name": "x"})
-    ck("mkdir 穿越 rel 被拒", c == 400, str(c))
-    c, d, _ = A.post("/api/fm_mkdir", {"vol": vid, "rel": "", "name": "CON"})
-    ck("Windows 保留名被拒", c == 400, str(c))
-    c, d, _ = A.post("/api/fm_mkdir", {"vol": vid, "rel": "", "name": "a<b"})
-    ck("非法字符名被拒", c == 400, str(c))
-
-    # 清理：移除测试卷索引 + 删除临时目录
-    if mvid:
-        c, d, _ = A.post("/api/admin/library", {"action": "drop", "id": mvid})
-        ck("清理测试卷", c == 200, str(c))
-    shutil.rmtree(tmp_root, ignore_errors=True)
+    ck("已下线 mkdir 穿越场景 → 404", c == 404, str(c))
 
     c, lst, _ = A.get(f"/api/list?vol={vid}&limit=1")
     fid0 = ((lst.get("items") or [{}])[0] or {}).get("id")

@@ -1297,8 +1297,8 @@ details.navdetail > summary::-webkit-details-marker { display: none; }
   .pl-btn { width: 36px; height: 36px; }
   .pl-time { font-size: 10px; }
   #pl-tcbadge { display: none; }   /* 小屏空间紧，转码状态由缓冲层传达 */
-  /* 小屏顶栏按钮不溢出：打包/新建文件夹是桌面场景能力，分享走卡片菜单 */
-  #btn-zip, #btn-newdir { display: none; }
+  /* 小屏顶栏按钮不溢出：打包下载是桌面场景能力，分享走卡片菜单 */
+  #btn-zip { display: none; }
 }
 
 /* ---------------- 空间分析 ---------------- */

@@ -61,12 +61,15 @@ MAX_BODY = 1 << 20            # 1MB 请求体上限
 MAX_URL = 4096
 
 LOGIN_GUARD = sec.LoginGuard(max_fail=5, window=600, lock_base=60)
+# 限流额度：此处读 filelib.json 只是出厂默认；make_server 启动时会用
+# settings 表（管理后台保存的值）校准，后台改完立即热更，无需重启。
 RL_USER = sec.RateLimiter(int(cfg.cfg("rate_limit_user", 300)))
 RL_GUEST = sec.RateLimiter(int(cfg.cfg("rate_limit_guest", 60)))
 # 媒体流专用额度：一次播放会连发多次 Range 请求，普通接口的 60/分 明显不够
 RL_MEDIA = sec.RateLimiter(int(cfg.cfg("rate_limit_media", 600)))
 MEDIA_SESSIONS: dict[int, set[str]] = {}
 MEDIA_LOCK = threading.Lock()
+MEDIA_MAX = int(cfg.cfg("max_media_sessions", 3))   # 同上：settings 表校准 + 热更
 TLS_ON = False    # --tls-cert/--tls-key 启动时置 True：会话 Cookie 加 Secure 标记
 
 # ---------- 实时转码（可选增强，需要外部 ffmpeg） ----------
@@ -1156,7 +1159,7 @@ class Handler(BaseHTTPRequestHandler):
         if u["role"] != "admin":
             with MEDIA_LOCK:
                 active = MEDIA_SESSIONS.setdefault(u["id"], set())
-                if sid not in active and len(active) >= int(cfg.cfg("max_media_sessions", 3)):
+                if sid not in active and len(active) >= MEDIA_MAX:
                     return self._err(429, "同时播放数已达上限，请先关闭其他播放窗口")
                 active.add(sid)
         src = long_path(self._abs_path(row))
@@ -1234,7 +1237,7 @@ class Handler(BaseHTTPRequestHandler):
         if u["role"] != "admin":
             with MEDIA_LOCK:
                 active = MEDIA_SESSIONS.setdefault(u["id"], set())
-                if sid not in active and len(active) >= int(cfg.cfg("max_media_sessions", 3)):
+                if sid not in active and len(active) >= MEDIA_MAX:
                     return self._err(429, "同时播放数已达上限，请先关闭其他播放窗口")
                 active.add(sid)
         src = long_path(self._abs_path(row))
@@ -1579,6 +1582,20 @@ class Handler(BaseHTTPRequestHandler):
         for k, v in body.items():
             if k in allowed:
                 dbmod.put_setting(conn, k, v)
+        # 热更：限流额度与媒体并发数立即生效，无需重启
+        for key, rl in (("rate_limit_user", RL_USER), ("rate_limit_guest", RL_GUEST),
+                        ("rate_limit_media", RL_MEDIA)):
+            if key in body:
+                try:
+                    rl.per_min = max(10, int(body[key]))
+                except (TypeError, ValueError):
+                    pass
+        if "max_media_sessions" in body:
+            try:
+                global MEDIA_MAX
+                MEDIA_MAX = max(1, int(body["max_media_sessions"]))
+            except (TypeError, ValueError):
+                pass
         users_mod.audit(conn, me, ip, "settings.save",
                         json.dumps({k: v for k, v in body.items() if k in allowed},
                                    ensure_ascii=False)[:300])
@@ -2118,32 +2135,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"vol": vol, "rel": rel, "dirs": out})
 
     def _api_fm_mkdir(self):
-        body = self._body()
-        vol = sec.clamp_int(body.get("vol"), 0, 10 ** 9, 0)
-        name = _clean_filename(str(body.get("name") or ""))
-        if not vol or not name:
-            return self._err(400, "名称不合法")
-        vrow = self._vol_row(vol)
-        if not vrow:
-            return self._err(404, "资料库不存在")
-        rel = self._norm_rel(body.get("rel"))
-        base = os.path.join(vrow["root_path"], rel.replace("/", os.sep)) if rel \
-            else vrow["root_path"]
-        if not self._under_root(vrow["root_path"], base):
-            return self._err(400, "路径无效")
-        new_dir = long_path(os.path.join(base, name))
-        if os.path.lexists(new_dir):
-            return self._err(409, "同名文件/文件夹已存在")
-        try:
-            os.mkdir(new_dir)
-        except OSError as ex:
-            return self._err(500, f"创建失败：{ex}")
-        full_rel = rel + name + "/"
-        # 补进 dirs 表（含可能未入库的祖先），目录树/侧栏立即可见
-        self.store.fm_mkdir(vol, full_rel)
-        users_mod.audit(self.store.rw, self._user(), sec.client_ip(self),
-                        "file.mkdir", full_rel[:250])
-        return self._json({"ok": True, "rel": full_rel, "name": name})
+        return self._err(404, "功能已移除")
 
     def _stream_download(self, row: dict, src: str):
         size = os.path.getsize(src)
@@ -2520,6 +2512,19 @@ def make_server(port: int, host: str = "127.0.0.1",
     for k, v in cfg.DEFAULTS.items():
         if dbmod.get_setting(conn, k, "__missing__") == "__missing__":
             dbmod.put_setting(conn, k, v)
+    # 限流额度以 settings 表为准（后台修改立即生效；filelib.json 只是出厂默认）
+    global MEDIA_MAX
+    for rl, key, dft in ((RL_USER, "rate_limit_user", 300),
+                         (RL_GUEST, "rate_limit_guest", 60),
+                         (RL_MEDIA, "rate_limit_media", 600)):
+        try:
+            rl.per_min = max(10, int(dbmod.get_setting(conn, key, dft)))
+        except (TypeError, ValueError):
+            pass
+    try:
+        MEDIA_MAX = max(1, int(dbmod.get_setting(conn, "max_media_sessions", 3)))
+    except (TypeError, ValueError):
+        pass
     conn.close()
 
     Handler.store = Store()
