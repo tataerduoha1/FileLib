@@ -595,23 +595,58 @@ details.autotags > summary {
 details.autotags > summary:hover { color: var(--fg); }
 details.autotags[open] > summary { margin-bottom: 2px; }
 
-/* 侧栏标签筛选条（全部/人工/自动 + 清空自动） */
-#nav-tags li.tagfilter {
-  display: flex; justify-content: flex-start; flex-wrap: wrap;
-  padding: 2px 12px 6px; border-left: 0; cursor: default; gap: 4px;
+/* ---------------- 标签浏览（主区热词云，v1.0.19 从侧栏迁入） ---------------- */
+.tags-head {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 2px 0 10px;
 }
-#nav-tags li.tagfilter:hover { background: none; }
-.tagfilter .tf-item {
-  cursor: pointer; font-size: 11px; padding: 1px 8px;
-  border: 1px solid var(--line); border-radius: 10px; color: var(--fg2);
+.tags-title h2 { font-size: 18px; margin: 0; }
+.tags-sub { color: var(--fg2); font-size: 12px; }
+.tags-head #tv-q {
+  flex: 1 1 180px; max-width: 280px; height: 32px; padding: 0 10px;
+  background: var(--bg2); border: 1px solid var(--line); border-radius: 8px;
+  color: var(--fg); font-size: 13px; font-family: inherit;
 }
-.tagfilter .tf-item:hover { color: var(--fg); border-color: var(--fg2); }
-.tagfilter .tf-item.on { background: var(--acc); border-color: var(--acc); color: #fff; }
-.tagfilter .tf-clear {
-  margin-left: auto; cursor: pointer; font-size: 11px; color: var(--fg2);
+.tags-head #tv-q:focus { outline: none; border-color: var(--acc); }
+.tv-tabs {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin: 0 0 14px;
+}
+.tv-tabs .tv-tab {
+  padding: 3px 14px; border-radius: 999px; cursor: pointer; user-select: none;
+  font-size: 12.5px; border: 1px solid var(--line); color: var(--fg2);
+}
+.tv-tabs .tv-tab:hover { color: var(--fg); border-color: var(--fg2); }
+.tv-tabs .tv-tab.on { background: var(--acc); border-color: var(--acc); color: var(--acc-fg, #fff); }
+.tv-tabs .tv-clear {
+  margin-left: 4px; cursor: pointer; font-size: 11.5px; color: var(--fg2);
   text-decoration: underline dotted;
 }
-.tagfilter .tf-clear:hover { color: var(--err); }
+.tv-tabs .tv-clear:hover { color: var(--err); }
+.tv-tabs .tv-hint { margin-left: auto; font-size: 11.5px; color: var(--fg2); }
+
+/* 热词云：按使用数占比分三档字号，一眼看出哪些标签最常用 */
+.tagcloud { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tchip {
+  display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
+  padding: 4px 11px; border-radius: 999px; cursor: pointer;
+  background: var(--bg2); border: 1px solid var(--line); color: var(--fg);
+  font-size: 12.5px; font-family: inherit; line-height: 1.5;
+  transition: border-color .14s, background .14s, color .14s, transform .08s;
+}
+.tchip:hover { border-color: var(--acc); color: var(--acc); }
+.tchip:active { transform: scale(.96); }
+.tchip.t2 { font-size: 14px; padding: 5px 13px; }
+.tchip.t3 { font-size: 15.5px; padding: 6px 15px; font-weight: 600; }
+.tchip.on { background: var(--acc); border-color: var(--acc); color: var(--acc-fg, #fff); }
+.tchip .au {
+  font-style: normal; font-size: 10px; padding: 0 5px; border-radius: 999px;
+  background: var(--bg3); border: 1px solid var(--line); color: var(--fg2);
+}
+.tchip.on .au { background: transparent; border-color: rgba(255, 255, 255, .4); color: inherit; }
+.tchip .cn { font-size: 11px; color: var(--fg2); }
+.tchip.on .cn { color: inherit; opacity: .8; }
+.tv-more { margin-top: 14px; text-align: center; }
 
 /* ---------------- 视频播放器 ---------------- */
 #player {
@@ -1269,6 +1304,18 @@ details.navdetail > summary::-webkit-details-marker { display: none; }
   .tg-ops { flex-basis: 100%; justify-content: flex-end; }
   .tg-name { font-size: 13px; }
 
+  /* 标签页（主区热词云）：搜索框独占一行，热词换行天然适配 */
+  .tags-head { align-items: stretch; }
+  .tags-title { flex: 1 1 auto; }
+  .tags-head #tv-q { order: 3; flex-basis: 100%; max-width: none; }
+  .tags-head .btn { order: 2; flex: none; }
+  .tv-tabs .tv-hint { display: none; }
+  .tchip { font-size: 12px; }
+  .tchip.t2 { font-size: 13px; }
+  .tchip.t3 { font-size: 14px; }
+  /* 管理器整页：新建按钮在手机上占满一行更好点 */
+  .tagman-page .page-head .btn { flex: 1 1 100%; order: 3; }
+
   .rd-body { padding: 18px 16px; font-size: 16px; }
   .rd-side { position: absolute; left: 0; top: 50px; bottom: 0; z-index: 5; box-shadow: var(--shadow2); }
   /* 手机竖屏阅读条放不下 7 个控件：藏次要的（字号/已读），
@@ -1488,13 +1535,29 @@ details.navdetail > summary::-webkit-details-marker { display: none; }
   background: var(--line); margin: 10px 0 14px; }
 .datashare i { display: block; height: 100%; }
 
-/* ---------------- 标签管理器（admin） ---------------- */
+/* ---------------- 标签管理器（admin，v1.0.19 从弹窗迁为整页） ---------------- */
 .tg-top { display: flex; gap: 8px; margin-bottom: 8px; }
-.modal h2 small#tg-scope {
+#tg-scope {
   display: block; font-size: 12px; font-weight: normal; color: var(--fg2);
   margin-top: 4px;
 }
-.modal h2 small#tg-scope b { color: var(--acc); font-weight: 600; }
+#tg-scope b { color: var(--acc); font-weight: 600; }
+.tagman-page { max-width: 980px; }
+.tagman-page .page-head {
+  display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap;
+  margin: 2px 0 12px;
+}
+.tagman-page .page-head h2 { font-size: 18px; margin: 0; }
+.tagman-page .page-head .btn { flex: none; }
+/* 整页版列表不再限高（弹窗版的 52vh 内滚改为跟主滚动条走） */
+.tagman-page .tg-list { max-height: none; }
+/* 批量操作条吸底：长列表里勾选后不用滚回顶部找按钮 */
+.tagman-page #tg-bulk {
+  position: sticky; bottom: 10px; z-index: 2;
+  margin-top: 12px; padding: 8px 12px;
+  background: var(--bg2); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: var(--shadow);
+}
 .tg-top input, .tg-top select {
   height: 30px; padding: 0 9px; background: var(--bg3);
   border: 1px solid var(--line); border-radius: 7px;

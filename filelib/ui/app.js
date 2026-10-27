@@ -39,7 +39,7 @@ const state = {
   libs: [],
   tree: null,
   openDirs: new Set(),
-  view: "home",       // home|list|topics|authors|series|kinds|continue|random|space
+  view: "home",       // home|list|topics|authors|series|kinds|continue|random|space|tags|tagman
   dir: "",
   q: "",
   kind: null,
@@ -48,6 +48,7 @@ const state = {
   author: null,
   mark: null,
   tag: null,
+  tagUser: null,      // 标签页筛选：null=全部 | "user"=人工 | "auto"=自动
   sort: "mtime_desc",
   offset: 0,
   limit: 120,
@@ -250,7 +251,7 @@ function serializeState() {
   return {
     vol: state.volId, view: state.view, dir: state.dir || null, q: state.q || null,
     kind: state.kind, topic: state.topic, series: state.series,
-    author: state.author, mark: state.mark, tag: state.tag,
+    author: state.author, mark: state.mark, tag: state.tag, tagu: state.tagUser || null,
     sort: state.sort === "mtime_desc" ? null : state.sort,
     ft: state.fulltext ? 1 : null,
   };
@@ -286,7 +287,7 @@ function parseURLState() {
   if (!sp.toString()) return null;
   const s = {};
   if (sp.has("lib")) s.vol = sp.get("lib") === "" ? null : +sp.get("lib");
-  for (const k of ["view", "dir", "q", "kind", "topic", "series", "author", "mark", "tag", "sort"]) {
+  for (const k of ["view", "dir", "q", "kind", "topic", "series", "author", "mark", "tag", "tagu", "sort"]) {
     if (sp.has(k)) s[k] = sp.get(k);
   }
   if (sp.get("ft") === "1") s.fulltext = true;
@@ -299,6 +300,7 @@ async function applyState(s, push) {
     view: s.view || (s.q ? "list" : "home"), dir: s.dir || "", q: s.q || "",
     kind: s.kind || null, topic: s.topic || null, series: s.series || null,
     author: s.author || null, mark: s.mark || null, tag: s.tag || null,
+    tagUser: s.tagu !== undefined ? (s.tagu === "user" || s.tagu === "auto" ? s.tagu : null) : state.tagUser,
     sort: s.sort || "mtime_desc", fulltext: !!s.fulltext,
   });
   const si = $("#search");
@@ -311,7 +313,7 @@ async function applyState(s, push) {
   if (push) pushHistory(false);
   markActive();
   renderLibBar();
-  await Promise.all([loadTree(), loadTags()]);
+  await loadTree();
   await render();
 }
 
@@ -397,7 +399,7 @@ function renderLibBar() {
     try { localStorage.setItem("filelib.vol", target == null ? "" : String(target)); } catch {}
     pushHistory(false);
     markActive();
-    Promise.all([loadStats(), loadTree(), loadTags()]).then(() => render())
+    Promise.all([loadStats(), loadTree()]).then(() => render())
       .catch(e => { toast(e.message || "加载失败", 2600); render().catch(() => {}); });
   });
 }
@@ -489,62 +491,8 @@ function renderKinds(st) {
 
 /* ---------------- 标签 ---------------- */
 
-let TAGS_VIEW = "all";   // 侧栏标签筛选：all | user | auto
-
-/* 侧栏标签多选筛选：state.tag 存逗号分隔多值（如 "科幻,2020"），null=未筛选 */
+/* 标签多选筛选辅助：state.tag 存逗号分隔多值（如 "科幻,2020"），null=未筛选 */
 const selTags = () => String(state.tag || "").split(",").filter(Boolean);
-
-async function loadTags() {
-  const el = $("#nav-tags");
-  if (!el) return;
-  try {
-    // 「人工/自动」过滤下推到服务端（user=1/0）：以前前端在 LIMIT 之后过滤，
-    // 而自动标签动辄几百上千个 n=1 的，LIMIT 300 也全被 auto: 占满，
-    // 人工标签永远排不进返回名单——「人工」tab 下一个都看不到
-    const f = TAGS_VIEW;
-    const uf = f === "user" ? "&user=1" : f === "auto" ? "&user=0" : "";
-    const r = await api(withVol(`/api/tags?limit=40${uf}`));
-    const shown = r.items || [];      // 服务端已按 tab 过滤
-    const bar = `<li class="tagfilter">
-      <span class="tf-item ${f === "all" ? "on" : ""}" data-tf="all">全部</span>
-      <span class="tf-item ${f === "user" ? "on" : ""}" data-tf="user">人工</span>
-      <span class="tf-item ${f === "auto" ? "on" : ""}" data-tf="auto">自动</span>
-      ${isAdmin() && shown.some(t => !t.user)
-        ? `<a class="tf-clear" id="btn-autotag-clear" title="清空全部自动标签（人工标签不受影响）">清空自动</a>` : ""}
-    </li>`;
-    el.innerHTML = bar + (shown.length
-      ? shown.map(t => `<li data-tag="${esc(t.name)}" class="${selTags().includes(t.name) ? "active" : ""}">
-          <span>🏷 ${esc(String(t.name).replace(/^auto:/, ""))}${t.user ? "" : " <small>自动</small>"}</span>
-          <span class="n">${(t.n || 0).toLocaleString()}</span></li>`).join("")
-      : `<li class="dim">${f === "all" ? "暂无标签（详情里可添加）" : "该类型下暂无标签"}</li>`);
-    $$("#nav-tags li[data-tag]").forEach(li => li.onclick = () => {
-      const cur = selTags();                          // 多选：点已选的取消，未选的追加
-      const i = cur.indexOf(li.dataset.tag);
-      if (i >= 0) cur.splice(i, 1); else cur.push(li.dataset.tag);
-      state.tag = cur.length ? cur.join(",") : null;
-      Object.assign(state, { view: "list", dir: "", kind: null, topic: null, series: null, author: null, mark: null });
-      refresh();
-    });
-    $$("#nav-tags [data-tf]").forEach(s => s.onclick = () => {
-      TAGS_VIEW = s.dataset.tf;
-      loadTags();
-    });
-    const clr = $("#btn-autotag-clear");
-    if (clr) clr.onclick = async (ev) => {
-      ev.stopPropagation();
-      if (!confirm("确定清空全部自动标签？\n\n人工标签不受影响；清空后可在「维护 → 🏷 自动打标签」重新生成。")) return;
-      try {
-        const rr = await api("/api/autotag_clear", post({}));
-        toast(`已清除 ${rr.removed || 0} 条自动标签`);
-        if (state.tag) state.tag = selTags().filter(t => !t.startsWith("auto:")).join(",") || null;
-        loadTags();
-        refresh();
-      } catch (e) { toast(e.message, 2600); }
-    };
-  } catch {
-    el.innerHTML = "";
-  }
-}
 
 /* ---------------- 目录树 ---------------- */
 
@@ -634,14 +582,13 @@ function markActive() {
     if (state.view === "list") {
       if (["star", "read", "todo"].includes(state.mark)) on = li.dataset.nav === state.mark;
     } else {
-      on = li.dataset.nav === state.view;
+      // 标签管理器是标签浏览的子页，导航高亮仍落在「标签」上
+      on = li.dataset.nav === (state.view === "tagman" ? "tags" : state.view);
     }
     li.classList.toggle("active", on);
   });
   $$("#nav-kinds li[data-kind]").forEach(li =>
     li.classList.toggle("active", state.kind === li.dataset.kind));
-  $$("#nav-tags li[data-tag]").forEach(li =>
-    li.classList.toggle("active", selTags().includes(li.dataset.tag)));
   $$("#nav-tree li.tnode").forEach(li =>
     li.classList.toggle("active", li.dataset.rel === state.dir && state.view === "list"));
   // 顶栏场景按钮：📦 打包下载只在文件列表里有意义
@@ -849,6 +796,8 @@ async function render() {
       case "random": return await viewRandom();
       case "stats": return await viewStats();
       case "space": return await viewSpace();
+      case "tags": return await viewTags();
+      case "tagman": return await viewTagman();
       case "recent": state.sort = "mtime_desc"; state.view = "list"; return await startList();
       case "big": state.sort = "size_desc"; state.view = "list"; return await startList();
       case "list": return await startList();
@@ -984,6 +933,114 @@ async function viewKinds() {
     Object.assign(state, { view: "list", dir: "" });
     refresh();
   });
+}
+
+/* ---------------- 标签浏览（主区热词云，v1.0.19 从侧栏迁入） ---------------- */
+
+let TAGS_EXPANDED = false;   // 热词云「展开全部 / 收起」状态（重进视图重置）
+const TAGS_PAGE = 80;        // 默认最多展示的热词数量，其余折叠进「展开全部」
+const stripAuto = s => String(s).replace(/^auto:/, "");
+
+async function viewTags() {
+  const el = $("#grid");
+  el.className = "";
+  setCrumb(`🏷 标签${libSuffix()}`);
+  const f = state.tagUser || "all";
+  let items = [];
+  try {
+    // 「人工/自动」过滤下推到服务端（user=1/0）：在 LIMIT 之前过滤，
+    // 人工标签不会被海量自动标签淹没。「全部」按使用数降序 = 热词优先
+    const uf = f === "user" ? "&user=1" : f === "auto" ? "&user=0" : "";
+    const r = await api(withVol(`/api/tags?limit=2000${uf}`));
+    items = r.items || [];
+  } catch (e) {
+    el.innerHTML = `<div class="empty"><div class="big">🏷</div>标签加载失败<br>
+      <small>${esc(e.message || "网络异常")} —— 请刷新重试</small></div>`;
+    return;
+  }
+
+  const maxN = Math.max(1, ...items.map(t => t.n || 0));
+  el.innerHTML = `
+    <div class="tags-head">
+      <div class="tags-title">
+        <h2>🏷 标签${libSuffix()}</h2>
+        <small class="tags-sub">共 ${items.length.toLocaleString()} 个标签 · 按使用热度排列</small>
+      </div>
+      <input id="tv-q" type="search" placeholder="筛选标签…" autocomplete="off" spellcheck="false">
+      ${isAdmin() ? `<button class="btn" id="tv-manage" title="新建 / 改名 / 合并 / 隐藏 / 删除标签">⚙ 标签管理器</button>` : ""}
+    </div>
+    <div class="tv-tabs">
+      <span class="tv-tab ${f === "all" ? "on" : ""}" data-f="all">全部</span>
+      <span class="tv-tab ${f === "user" ? "on" : ""}" data-f="user">人工</span>
+      <span class="tv-tab ${f === "auto" ? "on" : ""}" data-f="auto">自动</span>
+      ${isAdmin() && items.some(t => !t.user)
+        ? `<a id="tv-autoclear" title="清空全部自动标签（人工标签不受影响）">清空自动</a>` : ""}
+      <span class="tv-hint">点击标签筛选文件</span>
+    </div>
+    <div id="tv-cloud" class="tagcloud"></div>
+    <div id="tv-more" class="tv-more"></div>`;
+
+  let TAGS_Q = "";               // 客户端筛选词（只过滤已加载的标签，不重新请求）
+  const cloud = $("#tv-cloud");
+  const renderCloud = () => {
+    let list = items;
+    if (TAGS_Q) {
+      const k = TAGS_Q.toLowerCase();
+      list = items.filter(t => stripAuto(t.name).toLowerCase().includes(k));
+    }
+    // 搜索时显示全部匹配；平时只显示热词前 N 个
+    const show = (TAGS_Q || TAGS_EXPANDED) ? list : list.slice(0, TAGS_PAGE);
+    cloud.innerHTML = show.length ? show.map(t => {
+      const r = (t.n || 0) / maxN;   // 相对最热标签的占比，分三档字号
+      const tier = r >= 0.5 ? " t3" : r >= 0.15 ? " t2" : "";
+      const au = (!t.user && f === "all") ? `<i class="au">自动</i>` : "";
+      const on = selTags().includes(t.name) ? " on" : "";
+      return `<button class="tchip${tier}${on}" data-tag="${esc(t.name)}"
+        title="${esc(t.name)}（点击筛选该标签的文件）">${esc(stripAuto(t.name))}${au}
+        <span class="cn">${(t.n || 0).toLocaleString()}</span></button>`;
+    }).join("")
+      : (!items.length && !TAGS_Q)
+        ? `<div class="empty"><div class="big">🏷</div>还没有标签<br>
+           <small>在文件详情里可添加人工标签；管理员可在「维护 → 🏷 自动打标签」批量生成</small></div>`
+        : `<div class="empty"><div class="big">🏷</div>没有匹配的标签</div>`;
+    $$("#tv-cloud .tchip").forEach(c => c.onclick = () => {
+      state.tag = c.dataset.tag;
+      Object.assign(state, { view: "list", dir: "", kind: null, topic: null,
+        series: null, author: null, mark: null });
+      refresh();
+    });
+    const more = $("#tv-more");
+    if (more) more.innerHTML = (!TAGS_Q && list.length > TAGS_PAGE)
+      ? `<button class="btn ghost" id="tv-expand">${TAGS_EXPANDED ? "收起" : `展开全部（共 ${list.length} 个）`}</button>`
+      : "";
+    const ex = $("#tv-expand");
+    if (ex) ex.onclick = () => { TAGS_EXPANDED = !TAGS_EXPANDED; renderCloud(); };
+  };
+  renderCloud();
+
+  const qi = $("#tv-q");
+  qi.oninput = debounce(() => {
+    TAGS_Q = qi.value.trim();
+    TAGS_EXPANDED = false;
+    renderCloud();
+  }, 150);
+  $$(".tv-tabs .tv-tab").forEach(s => s.onclick = () => {
+    state.tagUser = s.dataset.f === "all" ? null : s.dataset.f;
+    TAGS_EXPANDED = false;
+    refresh();
+  });
+  const mg = $("#tv-manage");
+  if (mg) mg.onclick = () => { TAGMAN_Q = ""; state.view = "tagman"; refresh(); };
+  const ac = $("#tv-autoclear");
+  if (ac) ac.onclick = async () => {
+    if (!confirm("确定清空全部自动标签？\n\n人工标签不受影响；清空后可在「维护 → 🏷 自动打标签」重新生成。")) return;
+    try {
+      const rr = await api("/api/autotag_clear", post({}));
+      toast(`已清除 ${rr.removed || 0} 条自动标签`);
+      if (state.tag) state.tag = selTags().filter(t => !t.startsWith("auto:")).join(",") || null;
+      refresh();
+    } catch (e) { toast(e.message, 2600); }
+  };
 }
 
 async function viewTopics() {
@@ -1907,7 +1964,6 @@ async function openDetail(id) {
     const save = async () => {
       const r = await api("/api/set_tags", post({ id: it.id, tags: userNames() }));
       it.tags = r.tags;
-      loadTags();
       renderChips();
     };
     const renderChips = () => {
@@ -2683,7 +2739,8 @@ function pollTask() {
           } else if (t.name === "dedup") {
             showDups(false).catch(() => {});   // 去重分析完成后自动展示结果
           } else if (t.name === "autotag") {
-            loadTags();                        // 打标签完成后侧栏标签云立即出现
+            // 自动标签生成完成：正开着标签页/管理器就立刻刷新出来
+            if (state.view === "tags" || state.view === "tagman") render().catch(() => {});
           }
         } else if (t.state === "error") {
           toast("任务失败：" + (t.message || ""), 6000);
@@ -4507,7 +4564,7 @@ function bindUI() {
     else if (t === "library") openAdmin("libs");
   });
 
-  // 侧栏分组折叠（浏览 / 我的 / 按类型 / 目录 / 标签 / 维护）
+  // 侧栏分组折叠（浏览 / 我的 / 按类型 / 目录 / 维护）
   bindNavGroups();
   applyGrpState();
 
@@ -4545,10 +4602,6 @@ function bindUI() {
     state.openDirs.clear();
     renderTree();
   };
-  $("#tag-manage").onclick = e => {
-    e.stopPropagation();
-    openTagAdmin();
-  };
 
   bindSearch();
   window.addEventListener("resize", debounce(() => {
@@ -4576,13 +4629,17 @@ function bindUI() {
   $("#btn-top").onclick = () => mainEl.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-/* 标签管理器（admin）
+/* 标签管理器（admin）：整页视图（v1.0.19 前是弹窗，随标签区一起迁入主显示栏）
    搜索 / 排序 / 来源筛选（含隐藏） / 多选批量（合并·隐藏·删除） / 单个改名。
-   点标签名 = 用该标签筛选文件（与侧栏点标签一致）；点勾选框/空白只做选择。
-   隐藏 ≠ 删除：隐藏的标签不出现在侧栏与聚合里，文件筛选仍可用。
-   initialQ：打开时预填搜索框（新建成功后用它让用户立刻看到新标签）。 */
-async function openTagAdmin(initialQ = "") {
-  const M = { view: "all", sort: "n", q: String(initialQ || "").trim(), sel: new Set(), all: [] };
+   点标签名 = 用该标签筛选文件；点勾选框/空白只做选择。
+   隐藏 ≠ 删除：隐藏的标签不出现在标签云与聚合里，文件筛选仍可用。
+   TAGMAN_Q：搜索词在重渲染间保留（新建成功后预填，让用户立刻看到新标签）。 */
+let TAGMAN_Q = "";
+
+async function viewTagman(initialQ) {
+  if (!isAdmin()) { state.view = "tags"; return viewTags(); }   // 深链防绕过
+  if (initialQ !== undefined) TAGMAN_Q = String(initialQ).trim();
+  const M = { view: "all", sort: "n", q: TAGMAN_Q, sel: new Set(), all: [] };
   const strip = s => String(s).replace(/^auto:/, "");
   // 管理范围随当前库：库视角只看「本库使用 + 全局未用」的标签，
   // 全部资料库看全部——标题明示范围，避免误以为看到的是全库数据
@@ -4592,35 +4649,42 @@ async function openTagAdmin(initialQ = "") {
   const scope = libName
     ? `当前管理：<b>${esc(libName)}</b>（切到「全部资料库」可管理全部标签）`
     : "当前管理：全部资料库";
-  openModal(`<h2>🏷 标签管理器 <small id="tg-scope">${scope}</small></h2>
-    <div class="tg-top">
-      <input type="text" id="tg-q" placeholder="搜索标签…" autocomplete="off" spellcheck="false">
-      <select id="tg-sort">
-        <option value="n">按使用数</option>
-        <option value="name">按名称</option>
-      </select>
-      <button class="btn small ghost" id="tg-all" title="选中当前筛选出的全部标签（再次点击取消）">全选</button>
-    </div>
-    <div class="tg-tabs">
-      <span class="tg-tab on" data-v="all">全部</span>
-      <span class="tg-tab" data-v="user">人工</span>
-      <span class="tg-tab" data-v="auto">自动</span>
-      <span class="tg-tab" data-v="hidden">隐藏</span>
-      <span id="tg-count" class="tg-count"></span>
-    </div>
-    <div id="tg-list" class="tg-list"></div>
-    <div id="tg-bulk" class="tg-bulk hidden">
-      <span id="tg-selcnt"></span>
-      <button class="btn small acc" id="tg-merge" title="把其余选中标签的文件关联并入保留的那个">⧉ 合并…</button>
-      <button class="btn small" id="tg-hidebtn">🚫 隐藏</button>
-      <button class="btn small" id="tg-unhide">👁 取消隐藏</button>
-      <button class="btn small danger" id="tg-del">🗑 删除</button>
-      <button class="btn small ghost" id="tg-clearsel">取消选择</button>
-    </div>
-    <div class="modal-btns">
-      <button class="btn" id="tag-new">＋ 新建标签</button>
-      <button class="btn acc" data-close>关闭</button>
-    </div>`);
+  const el = $("#grid");
+  el.className = "";
+  setCrumb(`🏷 标签管理器${libSuffix()}`);
+  el.innerHTML = `
+    <div class="tagman-page">
+      <div class="page-head">
+        <div class="tags-title">
+          <h2>🏷 标签管理器 <small id="tg-scope">${scope}</small></h2>
+        </div>
+        <button class="btn acc" id="tag-new">＋ 新建标签</button>
+      </div>
+      <div class="tg-top">
+        <input type="text" id="tg-q" placeholder="搜索标签…" autocomplete="off" spellcheck="false">
+        <select id="tg-sort">
+          <option value="n">按使用数</option>
+          <option value="name">按名称</option>
+        </select>
+        <button class="btn small ghost" id="tg-all" title="选中当前筛选出的全部标签（再次点击取消）">全选</button>
+      </div>
+      <div class="tg-tabs">
+        <span class="tg-tab on" data-v="all">全部</span>
+        <span class="tg-tab" data-v="user">人工</span>
+        <span class="tg-tab" data-v="auto">自动</span>
+        <span class="tg-tab" data-v="hidden">隐藏</span>
+        <span id="tg-count" class="tg-count"></span>
+      </div>
+      <div id="tg-list" class="tg-list page"></div>
+      <div id="tg-bulk" class="tg-bulk hidden">
+        <span id="tg-selcnt"></span>
+        <button class="btn small acc" id="tg-merge" title="把其余选中标签的文件关联并入保留的那个">⧉ 合并…</button>
+        <button class="btn small" id="tg-hidebtn">🚫 隐藏</button>
+        <button class="btn small" id="tg-unhide">👁 取消隐藏</button>
+        <button class="btn small danger" id="tg-del">🗑 删除</button>
+        <button class="btn small ghost" id="tg-clearsel">取消选择</button>
+      </div>
+    </div>`;
 
   const syncBulk = () => {
     $("#tg-bulk").classList.toggle("hidden", M.sel.size === 0);
@@ -4687,7 +4751,6 @@ async function openTagAdmin(initialQ = "") {
     const r = await api(withVol("/api/tags?limit=2000&show_hidden=1&empty=1"));
     M.all = r.items || [];
     render();
-    loadTags();                    // 侧栏同步
   };
 
   const bulkSetHidden = async on => {
@@ -4707,12 +4770,11 @@ async function openTagAdmin(initialQ = "") {
     });
     $$("#tg-list .tg-row").forEach(row => row.onclick = e => {
       // 只有点「标签名」才跳出去筛选文件；点勾选框 / 按钮 / 行内空白都不动，
-      // 避免想勾选时点偏一点就被弹出管理器（高频误触反馈）
+      // 避免想勾选时点偏一点就被当成跳转（高频误触反馈）
       if (!e.target.closest(".tg-name")) return;
       state.tag = row.dataset.nm;
       Object.assign(state, { view: "list", dir: "", kind: null, topic: null,
         series: null, author: null, mark: null });
-      closeModal();
       refresh();
     });
     $$("#tg-list [data-hd]").forEach(b => b.onclick = async e => {
@@ -4736,7 +4798,8 @@ async function openTagAdmin(initialQ = "") {
       if (!nn || nn === old) return;
       try { await api("/api/tag_admin", post({ action: "rename", old, new: nn })); }
       catch (err) { toast(err.message, 2600); }
-      openTagAdmin();              // uiPrompt 关过浮层，重建管理器
+      TAGMAN_Q = M.q;              // 保留搜索词：改名后仍停在同一批标签里
+      refresh();                   // 整页重渲染管理器（旧弹窗版是整窗重建）
     });
   };
 
@@ -4792,21 +4855,22 @@ async function openTagAdmin(initialQ = "") {
         } catch (err) { toast(err.message, 3000); break; }
       }
       toast(`已合并 ${okc} 个标签到「${strip(dst)}」`);
-      openTagAdmin();
+      closeModal();
+      TAGMAN_Q = M.q;
+      refresh();
     };
   };
   $("#tag-new").onclick = async () => {
     const name = (await uiPrompt("新建标签", { placeholder: "标签名" }))?.trim();
     if (!name) return;
-    loadTags();
     try { await api("/api/tag_admin", post({ action: "create", name })); }
     catch (err) {
       toast(err.message, 2600);    // 重名等错误：服务端会明确提示
-      openTagAdmin();
       return;
     }
     toast(`已创建「${strip(name)}」`);
-    openTagAdmin(name);            // 预填搜索框，确认新标签就在眼前
+    TAGMAN_Q = name;               // 预填搜索框，确认新标签就在眼前
+    refresh();
   };
 
   await reload();
@@ -4873,7 +4937,7 @@ async function boot() {
     if (volFixed) pushHistory(true);
     return;
   }
-  await Promise.all([loadTree(), loadTags()]);
+  await loadTree();
   markActive();
   await render();
   pushHistory(true);
